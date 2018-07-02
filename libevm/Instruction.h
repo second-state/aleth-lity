@@ -28,9 +28,9 @@ namespace eth
 enum class Instruction: uint8_t
 {
 	STOP = 0x00,        ///< halts execution
-	ADD,                ///< addition operation
-	MUL,                ///< mulitplication operation
-	SUB,                ///< subtraction operation
+	ADD,                ///< unsigned addition operation
+	MUL,                ///< unsigned mulitplication operation
+	SUB,                ///< unsigned subtraction operation
 	DIV,                ///< integer division operation
 	SDIV,               ///< signed integer division operation
 	MOD,                ///< modulo remainder operation
@@ -39,6 +39,9 @@ enum class Instruction: uint8_t
 	MULMOD,             ///< unsigned modular multiplication
 	EXP,                ///< exponential operation
 	SIGNEXTEND,         ///< extend length of signed integer
+	SADD,               ///< signed addition operation with overflow checking
+	SMUL,               ///< signed subtraction operation with overflow checking
+	SSUB,               ///< signed multiplication operation with overflow checking
 
 	LT = 0x10,          ///< less-than comparision
 	GT,                 ///< greater-than comparision
@@ -79,7 +82,7 @@ enum class Instruction: uint8_t
 	NUMBER,             ///< get the block's number
 	DIFFICULTY,         ///< get the block's difficulty
 	GASLIMIT,           ///< get the block's gas limit
-	
+
 	POP = 0x50,         ///< remove item from stack
 	MLOAD,              ///< load word from memory
 	MSTORE,             ///< save word to memory
@@ -92,7 +95,7 @@ enum class Instruction: uint8_t
 	MSIZE,              ///< get the size of active memory
 	GAS,                ///< get the amount of available gas
 	JUMPDEST,           ///< set a potential jump destination
-	
+
 	PUSH1 = 0x60,       ///< place 1 byte item on stack
 	PUSH2,              ///< place 2 byte item on stack
 	PUSH3,              ///< place 3 byte item on stack
@@ -125,7 +128,7 @@ enum class Instruction: uint8_t
 	PUSH30,             ///< place 30 byte item on stack
 	PUSH31,             ///< place 31 byte item on stack
 	PUSH32,             ///< place 32 byte item on stack
-	
+
 	DUP1 = 0x80,        ///< copies the highest item in the stack to the top of the stack
 	DUP2,               ///< copies the second highest item in the stack to the top of the stack
 	DUP3,               ///< copies the third highest item in the stack to the top of the stack

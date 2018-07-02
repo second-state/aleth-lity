@@ -547,6 +547,22 @@ void VM::interpretCases()
         }
         NEXT
 
+		CASE(SADD)
+		{
+			ON_OP();
+			updateIOGas();
+			u256 result =  m_SP[0] + m_SP[1];
+			bool sa = bit_test(m_SP[0], 255);
+			bool sb = bit_test(m_SP[1], 255);
+			bool sr = bit_test(result, 255);
+
+			if (sa == sb && sa != sr)
+				throwBadInstruction();
+
+			m_SPP[0] = result;
+		}
+		NEXT
+
         CASE(MUL)
         {
             ON_OP();
@@ -557,6 +573,30 @@ void VM::interpretCases()
         }
         NEXT
 
+		CASE(SMUL)
+		{
+			ON_OP();
+			updateIOGas();
+
+			int norm = 1;
+			u256 a = m_SP[0];
+			u256 b = m_SP[1];
+
+			if (bit_test(a, 255)) a = ~a + 1, norm = 1 - norm;
+			if (bit_test(b, 255)) b = ~b + 1, norm = 1 - norm;
+
+			u512 result = u512(a) * u512(b);
+
+			// neg range = 0 ~ 2^255
+			// pos range = 0 ~ 2^255-1
+			if (result > (u512(1) << 255) - norm)
+				throwBadInstruction();
+
+			if (norm == 0)
+				result = ~ result + 1;
+			m_SPP[0] = u256(result);
+		}
+
         CASE(SUB)
         {
             ON_OP();
@@ -565,6 +605,26 @@ void VM::interpretCases()
             m_SPP[0] = m_SP[0] - m_SP[1];
         }
         NEXT
+
+		CASE(SSUB)
+		{
+			ON_OP();
+			updateIOGas();
+
+			u256 b = ~ m_SP[1];
+			u256 result = m_SP[0] + b;
+			bool sa = bit_test(m_SP[0], 255);
+			bool sb = bit_test(b, 255);
+			bool sr = bit_test(result, 255);
+			static u256 S256_MAX = (u256(1) << 255) -1;
+
+			if (sa == sb && sa != sr)
+				throwBadInstruction();
+			if (result == S256_MAX)
+				throwBadInstruction();
+			m_SPP[0] = result + 1;
+		}
+		NEXT
 
         CASE(DIV)
         {

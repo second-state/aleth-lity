@@ -175,9 +175,9 @@ namespace eth
         &&MULMOD,                               \
         &&EXP,                                  \
         &&SIGNEXTEND,                           \
-        &&INVALID,                              \
-        &&INVALID,                              \
-        &&INVALID,                              \
+        &&SADD,                                 \
+        &&SMUL,                                 \
+        &&SSUB,                                 \
         &&INVALID,                              \
         &&LT, /* 10, */                         \
         &&GT,                                   \
