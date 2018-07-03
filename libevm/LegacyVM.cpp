@@ -512,7 +512,7 @@ void LegacyVM::interpretCases()
 			bool sa = bit_test(m_SP[0], 255);
 			bool sb = bit_test(b, 255);
 			bool sr = bit_test(result, 255);
-			static u256 S256_MAX = (u256(1) << 255) -1;
+			static u256 S256_MAX = (u256(1) << 255) - 1;
 
 			if (sa == sb && sa != sr)
 				throwBadInstruction();
