@@ -435,9 +435,12 @@ void LegacyVM::interpretCases()
 		{
 			ON_OP();
 			updateIOGas();
+			u256 result =  m_SP[0] + m_SP[1];
 
-			//pops two items and pushes their sum mod 2^256.
-			m_SPP[0] = m_SP[0] + m_SP[1];
+			if (result < m_SP[0])
+				throwBadInstruction();
+
+			m_SPP[0] = result;
 		}
 		NEXT
 
@@ -462,9 +465,12 @@ void LegacyVM::interpretCases()
 		{
 			ON_OP();
 			updateIOGas();
+			u256 result = m_SP[0] * m_SP[1];
 
-			//pops two items and pushes their product mod 2^256.
-			m_SPP[0] = m_SP[0] * m_SP[1];
+			if (m_SP[0] != 0 && result / m_SP[0] != m_SP[1])
+				throwBadInstruction();
+
+			m_SPP[0] = result;
 		}
 		NEXT
 
@@ -497,6 +503,9 @@ void LegacyVM::interpretCases()
 		{
 			ON_OP();
 			updateIOGas();
+
+			if (m_SP[0] < m_SP[1])
+				throwBadInstruction();
 
 			m_SPP[0] = m_SP[0] - m_SP[1];
 		}
