@@ -1,0 +1,19 @@
+image: registry-cybermiles.skymizer.com/cybermiles/environment:ci
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+
+build:
+  stage: build
+  script:
+    - mkdir build
+    - cd build
+    - cmake ..
+    - make -j8
+    - cd ..
+    - rm -rf aleth
+    - cp build/aleth/aleth .
+  artifacts:
+    paths:
+      - aleth
+    expire_in: 1 month
