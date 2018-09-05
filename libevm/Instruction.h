@@ -236,6 +236,7 @@ enum class Instruction : uint8_t
     CALLCODE,           ///< message-call with another account's code only
     RETURN,             ///< halt execution returning output data
     DELEGATECALL,       ///< like CALLCODE but keeps caller's value and sender
+    ENI,                ///< Ethereum Native Interface
     CREATE2 = 0xf5,     ///< create a new account with associated code. sha3((sender + salt + code)
     STATICCALL = 0xfa,  ///< like CALL except state changing operation are not permitted (will
                         ///< throw)
