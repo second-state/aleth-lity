@@ -166,6 +166,15 @@ void VM::caseCreate()
     ++m_PC;
 }
 
+void VM::caseENI()
+{
+    m_bounce = &VM::interpretCases;
+
+    // auto funcName = m_SP[0];
+    // auto typeOffset = m_SP[1];
+    // auto dataOffset = m_SP[2];
+}
+
 void VM::caseCall()
 {
     m_bounce = &VM::interpretCases;

@@ -1,0 +1,135 @@
+#pragma once
+
+enum Code {
+    BOOL,
+	ADDRESS,
+	BYTES,
+	ENUM,
+	STRING,
+	FIX_ARRAY_START,
+	DYN_ARRAY_START,
+	STRUCT_START,
+	STRUCT_END,
+	INT,
+	INT8,
+	INT16,
+	INT24,
+	INT32,
+	INT40,
+	INT48,
+	INT56,
+	INT64,
+	INT72,
+	INT80,
+	INT88,
+	INT96,
+	INT104,
+	INT112,
+	INT120,
+	INT128,
+	INT136,
+	INT144,
+	INT152,
+	INT160,
+	INT168,
+	INT176,
+	INT184,
+	INT192,
+	INT200,
+	INT208,
+	INT216,
+	INT224,
+	INT232,
+	INT240,
+	INT248,
+	INT256,
+	UINT,
+	UINT8,
+	UINT16,
+	UINT24,
+	UINT32,
+	UINT40,
+	UINT48,
+	UINT56,
+	UINT64,
+	UINT72,
+	UINT80,
+	UINT88,
+	UINT96,
+	UINT104,
+	UINT112,
+	UINT120,
+	UINT128,
+	UINT136,
+	UINT144,
+	UINT152,
+	UINT160,
+	UINT168,
+	UINT176,
+	UINT184,
+	UINT192,
+	UINT200,
+	UINT208,
+	UINT216,
+	UINT224,
+	UINT232,
+	UINT240,
+	UINT248,
+	UINT256,
+	BYTE1,
+	BYTE2,
+	BYTE3,
+	BYTE4,
+	BYTE5,
+	BYTE6,
+	BYTE7,
+	BYTE8,
+	BYTE9,
+	BYTE10,
+	BYTE11,
+	BYTE12,
+	BYTE13,
+	BYTE14,
+	BYTE15,
+	BYTE16,
+	BYTE17,
+	BYTE18,
+	BYTE19,
+	BYTE20,
+	BYTE21,
+	BYTE22,
+	BYTE23,
+	BYTE24,
+	BYTE25,
+	BYTE26,
+	BYTE27,
+	BYTE28,
+	BYTE29,
+	BYTE30,
+	BYTE31,
+	BYTE32,
+};
+
+inline bool IsComplexType(Code c) {
+	switch (c) {
+	case FIX_ARRAY_START:
+	case DYN_ARRAY_START:
+	case STRUCT_START:
+	case STRING:
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline bool IsSint(Code code) {
+	return INT <= code and code <= INT256;
+}
+
+inline bool IsUint(Code code) {
+	return UINT <= code and code <= UINT256;
+}
+
+inline bool IsBool(Code code) {
+	return BOOL == code;
+}

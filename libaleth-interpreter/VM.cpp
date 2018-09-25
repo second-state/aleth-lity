@@ -331,6 +331,13 @@ void VM::interpretCases()
         }
         BREAK
 
+        CASE(ENI)
+        {
+            ON_OP();
+            m_bounce = &VM::caseENI;
+        }
+        BREAK
+
         CASE(RETURN)
         {
             ON_OP();

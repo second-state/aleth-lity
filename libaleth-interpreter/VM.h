@@ -101,7 +101,7 @@ private:
     u256 m_stack[VMSchedule::stackLimit];
     u256 *m_stackEnd = &m_stack[VMSchedule::stackLimit];
     size_t stackSize() { return m_stackEnd - m_SP; }
-    
+
     // constant pool
     std::vector<u256> m_pool;
 
@@ -127,6 +127,7 @@ private:
     void caseCreate();
     bool caseCallSetup(evmc_message& _msg, bytesRef& o_output);
     void caseCall();
+    void caseENI();
 
     void copyDataToMemory(bytesConstRef _data, u256*_sp);
     uint64_t memNeed(u256 const& _offset, u256 const& _size);
@@ -153,7 +154,7 @@ private:
     void updateMem(uint64_t _newMem);
     void logGasMem();
     void fetchInstruction();
-    
+
     uint64_t decodeJumpDest(const byte* const _code, uint64_t& _pc);
     uint64_t decodeJumpvDest(const byte* const _code, uint64_t& _pc, byte _voff);
 
@@ -165,7 +166,7 @@ private:
         uint64_t w = uint64_t(v);
         return w;
     }
-    
+
     template<class T> uint64_t toInt15(T v)
     {
         // check for overflow
