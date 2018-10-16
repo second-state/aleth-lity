@@ -9,14 +9,14 @@ set(sources
     LegacyVMOpt.cpp
     VMFace.h
     VMFactory.cpp VMFactory.h
-    eni/arg_converter.cc
-    eni/codes.hh
+    eni/arg_converter.cpp
+    eni/codes.hpp
     eni/ENI.cpp
-    eni/ENI.hh
-    eni/fork_call.hh
-    eni/mphelpers.hh
-    # eni/ota_downloader.cc
-    eni/ret_converter.cc
+    eni/ENI.hpp
+    eni/fork_call.h
+    eni/mphelpers.hpp
+    # eni/ota_downloader.cpp
+    eni/ret_converter.cpp
 )
 
 add_library(evm ${sources})

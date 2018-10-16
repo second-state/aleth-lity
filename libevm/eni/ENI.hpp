@@ -16,7 +16,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 
-#include "fork_call.hh"
+#include "fork_call.hpp"
 
 boost::filesystem::path DefaultDataDir()
 {
@@ -90,7 +90,7 @@ std::map<std::string, std::string> getEniFunctions()
 class ENI
 {
 public:
-    void InitENI(std::string eniFunction, std::string argsText)
+    void InitENI(const std::string& eniFunction, const std::string& argsText)
     {
         functions = getEniFunctions();
 

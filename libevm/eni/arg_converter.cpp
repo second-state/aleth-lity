@@ -5,14 +5,15 @@
 #include <boost/format.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
-#include "codes.hh"
-#include "mphelpers.hh"
+#include "codes.hpp"
+#include "mphelpers.hpp"
 
 using ArgumentParserError = std::runtime_error;
 
 
 class ArgConverter
 {
+private:
     using typeInfo_t = std::vector<Code>;
     std::ostringstream out;
     const typeInfo_t& typeInfo;
@@ -51,6 +52,9 @@ class ArgConverter
         ti++;
         boost::multiprecision::int256_t leng256;
         import_big_endian(leng256, di);
+        if (di + 32 > data.end()) {
+            throw ArgumentParserError("data index out of range");
+        }
         int64_t leng = static_cast<int64_t>(leng256);
         di += 32;
 
@@ -84,6 +88,9 @@ class ArgConverter
         ti++;
         out << "[";
         boost::multiprecision::int256_t leng256;
+        if (ti + 32 > typeInfo.end()) {
+            throw ArgumentParserError("typeInfo index out of range");
+        }
         import_big_endian(leng256, ti);
         int64_t leng = static_cast<int64_t>(leng256);
         ti += 32;
@@ -126,6 +133,9 @@ class ArgConverter
                 break;
             }
         }
+        if (ti >= typeInfo.end()) {
+            throw ArgumentParserError("typeInfo index out of range");
+        }
         if (*ti != STRUCT_END)
         {
             throw ArgumentParserError("encoding error - expected struct_end token");
@@ -138,6 +148,9 @@ class ArgConverter
         auto t = *ti;
         if (t == BOOL)
         {
+            if (di + 32 > data.end()) {
+                throw ArgumentParserError("data index out of range");
+            }
             bool boolVal = std::any_of(di, di + 32, [](char i) -> bool { return i; });
             if (boolVal)
             {
@@ -163,7 +176,7 @@ class ArgConverter
         else
         {
             throw ArgumentParserError(
-                boost::str(boost::format("unknown or not implemented type %1$d") % t));
+                boost::str(boost::format("encoding error - unknown or not implemented type: %1$d") % t));
         }
         ti++;
         di += 32;

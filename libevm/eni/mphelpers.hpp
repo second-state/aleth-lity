@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <boost/lexical_cast.hpp>
+#include <boost/range/iterator_range_core.hpp>
 
 template <class Number, class Iterator>
 void import_big_endian(Number& n, Iterator it)

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "arg_converter.cc"
-#include "testutil.hh"
+#include "arg_converter.cpp"
+#include "testutil.hpp"
 
 namespace
 {
@@ -80,24 +80,29 @@ TEST(ArgConverterTest, ControlEscapedString)
     EXPECT_EQ(ConvertArguments(f, d), "[\"abc\\\"d\\\\\\u0008\\u0000e\"]");
 }
 
-TEST(ArgConverterTest, ErrorEncoding1) {
-    std::vector<Code> f{155};
+TEST(ArgConverterTest, ErrorEncoding1)
+{
+    std::vector<Code> f{(Code)155};
     std::string d(70, 0);
-    for (int i = 0; i < 32; ++ i) {
+    for (int i = 0; i < 32; ++i)
+    {
         d[i] = '\xff';
     }
 
-    EXPECT_THROW_MSG(ConvertArguments(f, d), "encoding error - unknown or not implemented type: 155");
+    EXPECT_THROW_MSG(
+        ConvertArguments(f, d), "encoding error - unknown or not implemented type: 155");
 }
 
-TEST(ArgConverterTest, ErrorEncoding2) {
+TEST(ArgConverterTest, ErrorEncoding2)
+{
     std::vector<Code> f{STRUCT_START, INT};
     std::string d(70, 0);
-    for (int  i =0;i<32;++i) {
+    for (int i = 0; i < 32; ++i)
+    {
         d[i] = '\xff';
     }
 
-    EXPECT_THROW_MSG(ConvertArguments(f, d), "runtime error: index out of range")
+    EXPECT_THROW_MSG(ConvertArguments(f, d), "typeInfo index out of range");
 }
 
 }  // namespace

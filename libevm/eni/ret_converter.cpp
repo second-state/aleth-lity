@@ -7,8 +7,8 @@
 #include <boost/format.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
-#include "codes.hh"
-#include "mphelpers.hh"
+#include "codes.hpp"
+#include "mphelpers.hpp"
 
 using RetConverterError = std::runtime_error;
 
@@ -110,6 +110,9 @@ private:
         ++t;
         skipWS();
         expect('[');
+        if (t + 32 > typeInfo.end()) {
+            throw RetConverterError("typeInfo index out of range");
+        }
         boost::multiprecision::int256_t leng_256;
         import_big_endian(leng_256, t);
         auto leng = (int64_t)leng_256;
@@ -248,8 +251,7 @@ private:
         case 'u':
         {
             std::string str(j + 2, j + 6);
-            int code = 0;
-            sscanf(str.c_str(), "%x", &code);
+            int code = std::stoi(str, 0, 16);
             if (code < 128)
             {
                 ch = code;
@@ -325,7 +327,7 @@ private:
     }
 };
 
-std::string ConvertReturnValue(const std::vector<Code>& typeInfo, const std::string json)
+std::string ConvertReturnValue(const std::vector<Code>& typeInfo, const std::string& json)
 {
     RetConverter cvt(typeInfo, json);
     return cvt.execute();

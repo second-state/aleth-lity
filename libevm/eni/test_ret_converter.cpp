@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "ret_converter.cc"
-#include "testutil.hh"
+#include "ret_converter.cpp"
+#include "testutil.hpp"
 
 namespace
 {
@@ -93,7 +93,7 @@ TEST(RetConverterTest, ErrorInt)
 {
     {
         typeInfo_t f{INT};
-        EXPECT_THROW_MSG(ConvertReturnValue(f, "[-]"), "expected int, found '-'")
+        EXPECT_THROW_MSG(ConvertReturnValue(f, "[-]"), "expected int, found '-'");
     }
     {
         typeInfo_t f{UINT};
