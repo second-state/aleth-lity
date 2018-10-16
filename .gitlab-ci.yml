@@ -1,7 +1,8 @@
 image: registry-cybermiles.skymizer.com/cybermiles/environment:ci
 
-variables:
-  GIT_SUBMODULE_STRATEGY: recursive
+before_script:
+  - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@git-cybermiles.skymizer.com/".insteadOf https://git-cybermiles.skymizer.com/
+  - git submodule update --init
 
 build:
   stage: build
