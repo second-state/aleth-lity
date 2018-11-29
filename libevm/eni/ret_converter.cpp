@@ -7,7 +7,7 @@
 #include <boost/format.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
-#include "codes.hpp"
+#include "ret_converter.hpp"
 #include "mphelpers.hpp"
 
 using RetConverterError = std::runtime_error;
@@ -92,7 +92,7 @@ private:
             ++length;
         }
         boost::multiprecision::uint256_t length256(length);
-        out << export_big_endian_ostream(length256);
+        out << dev::toBigEndianString(length256);
         out << buf.rdbuf();
         if (length % 32)
         {
@@ -113,9 +113,7 @@ private:
         if (t + 32 > typeInfo.end()) {
             throw RetConverterError("typeInfo index out of range");
         }
-        boost::multiprecision::int256_t leng_256;
-        import_big_endian(leng_256, t);
-        auto leng = (int64_t)leng_256;
+        auto leng = (int64_t)s256FromBigEndian(t);
         t += 32;
 
         for (int64_t i = 0; i < leng; ++i)
@@ -201,7 +199,7 @@ private:
                     boost::str(boost::format("expected int, found '%c'") % *j0));
             }
             boost::multiprecision::int256_t value(std::string(j0, j));
-            out << export_big_endian_ostream(value);
+            out << dev::toBigEndianString(dev::s2u(value));
         }
         else if (IsUint(*t))
         {
@@ -214,7 +212,7 @@ private:
                     boost::str(boost::format("expected uint, found '%c'") % *j0));
             }
             boost::multiprecision::uint256_t value(std::string(j0, j));
-            out << export_big_endian_ostream(value);
+            out << dev::toBigEndianString(value);
         }
         else
         {

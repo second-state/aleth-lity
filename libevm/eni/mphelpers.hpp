@@ -2,26 +2,17 @@
 
 #include <string>
 #include <boost/lexical_cast.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <boost/range/iterator_range_core.hpp>
 
-template <class Number, class Iterator>
-void import_big_endian(Number& n, Iterator it)
-{
-    for (int i = 0; i < 32; ++i, ++it)
-    {
-        n <<= 8;
-        n |= *it;
-    }
+#include "../../libdevcore/CommonData.h"
+
+template <class Iterator>
+boost::multiprecision::uint256_t u256FromBigEndian(Iterator it) {
+    return dev::fromBigEndian<dev::u256>(boost::make_iterator_range_n(it, 32));
 }
 
-template <class T>
-std::string export_big_endian_ostream(T value)
-{
-    std::string str(32, 0);
-    for (int i = 0; i < 32; ++i)
-    {
-        str[31 - i] = (unsigned)(value & 0xff);
-        value >>= 8;
-    }
-    return str;
+template <class Iterator>
+boost::multiprecision::int256_t s256FromBigEndian(Iterator it) {
+    return dev::u2s(u256FromBigEndian(it));
 }

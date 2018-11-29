@@ -12,11 +12,12 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 
 #include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 
-#include "fork_call.hpp"
+#include "fork_call.h"
 
 boost::filesystem::path DefaultDataDir()
 {
@@ -33,18 +34,7 @@ boost::filesystem::path getLibPath()
     return DefaultDataDir() / "eni" / "lib";
 }
 
-std::vector<std::string> elf_DynamicSymbols(std::string elfPath)
-{
-    return {};
-    // TODO
-}
-
-std::map<std::string, std::string> getEniFunctions()
-{
-    // if runtime.GOOS != "linux" {
-    // 	return nil, errors.New("currently ENI is only supported on Linux")
-    // }
-
+std::vector<boost::filesystem::path> getEniSharedObjects() {
     auto libPath = getLibPath();
     {
         char* val = getenv("ENI_LIBRARY_PATH");
@@ -54,70 +44,61 @@ std::map<std::string, std::string> getEniFunctions()
         }
     }
 
-    std::vector<std::string> dynamicLibs;
+    std::vector<boost::filesystem::path> sharedObjects;
 
-    char* const fts_arg0[] = {strdupa(libPath.c_str()), 0};
-    FTS* fts_handle = fts_open(fts_arg0, FTS_COMFOLLOW | FTS_PHYSICAL, 0);
-    FTSENT* parent;
-    FTSENT* child;
-    while ((parent = fts_read(fts_handle)))
-    {
-        child = fts_children(fts_handle, 0);
-        while (child)
-        {
-            child = child->fts_link;
-            if (child->fts_statp->st_mode == 0 and
-                std::string(".so") == (child->fts_name + child->fts_namelen - 3))
-            {
-                dynamicLibs.emplace_back(child->fts_path);
-            }
+    for (const auto& child: boost::filesystem::recursive_directory_iterator(libPath)) {
+        auto path = child.path();
+        if (child.status().type() == boost::filesystem::regular_file and path.extension() == ".so") {
+            sharedObjects.push_back(child.path());
         }
     }
 
-    std::map<std::string, std::string> functions;
-    for (auto& lib : dynamicLibs)
-    {
-        for (auto& symbol : elf_DynamicSymbols(lib))
-        {
-            functions[symbol] = lib;
-        }
-    }
-
-    return functions;
+    return sharedObjects;
 }
-
 
 class ENI
 {
 public:
     void InitENI(const std::string& eniFunction, const std::string& argsText)
     {
-        functions = getEniFunctions();
-
         std::string gasSym = eniFunction + "_gas";
         std::string runSym = eniFunction + "_run";
 
-        std::string dynamicLibName = functions[gasSym];
-        void* handler = dlopen(dynamicLibName.c_str(), RTLD_LAZY);
-        if (not handler)
-        {
-            throw "dlopen failed: ";
+        auto sharedObjects = getEniSharedObjects();
+
+        if (NULL == dlopen("libeni.so", RTLD_LAZY)) {
+            std::cerr << "warning: cannot find libeni.so, trying to find it in automatically\n";
+            for (const auto& path: sharedObjects) {
+                if (path.filename() == "libeni.so") {
+                    if (dlopen(path.c_str(), RTLD_LAZY) != NULL) {
+                        std::cerr << "successfully loaded " << path << "\n";
+                        break;
+                    }
+                }
+            }
         }
 
-        void* gasFunc = dlsym(handler, gasSym.c_str());
-        if (not gasFunc)
-        {
-            throw "dlsym failed: ";
-        }
+        for (const auto& path: sharedObjects) {
+            void* handler = dlopen(path.c_str(), RTLD_LAZY);
+            if (not handler) {
+                throw std::runtime_error(boost::str(boost::format("dlopen failed '%s'") % path));
+            }
 
-        void* runFunc = dlsym(handler, runSym.c_str());
-        if (not runFunc)
-        {
-            throw "dlsym failed: ";
-        }
+            gasFunc = dlsym(handler, gasSym.c_str());
+            if (not gasFunc) {
+                continue;
+            }
 
-        opName = eniFunction;
-        argsText = argsText;
+            runFunc = dlsym(handler, runSym.c_str());
+            if (not runFunc) {
+                throw std::runtime_error(boost::str(boost::format("dlsym failed: '%s'") % runSym));
+            }
+
+            opName = eniFunction;
+            this->argsText = argsText;
+            return;
+        }
+        throw std::runtime_error(boost::str(boost::format("symbol not found: '%s'") % gasFunc));
     }
 
     uint64_t Gas()
@@ -144,10 +125,9 @@ public:
     }
 
 private:
-    std::map<std::string, std::string> functions;
     std::string opName;
-    void* gasFunc;
-    void* runFunc;
+    void* gasFunc = 0;
+    void* runFunc = 0;
     std::string argsText;
     std::string retText;
 };

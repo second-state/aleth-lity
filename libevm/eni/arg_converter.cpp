@@ -5,7 +5,7 @@
 #include <boost/format.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
-#include "codes.hpp"
+#include "arg_converter.hpp"
 #include "mphelpers.hpp"
 
 using ArgumentParserError = std::runtime_error;
@@ -50,12 +50,10 @@ private:
     void parseString()
     {
         ti++;
-        boost::multiprecision::int256_t leng256;
-        import_big_endian(leng256, di);
         if (di + 32 > data.end()) {
             throw ArgumentParserError("data index out of range");
         }
-        int64_t leng = static_cast<int64_t>(leng256);
+        auto leng = (int64_t)s256FromBigEndian(di);
         di += 32;
 
         std::stringstream buffer;
@@ -91,8 +89,7 @@ private:
         if (ti + 32 > typeInfo.end()) {
             throw ArgumentParserError("typeInfo index out of range");
         }
-        import_big_endian(leng256, ti);
-        int64_t leng = static_cast<int64_t>(leng256);
+        auto leng = (int64_t)s256FromBigEndian(ti);
         ti += 32;
 
         for (int64_t i = 0; i < leng; i++)
@@ -163,15 +160,12 @@ private:
         }
         else if (IsSint(t))
         {
-            boost::multiprecision::int256_t n;
-            import_big_endian(n, di);
-            out << n;
+            // fromBigEndian<s256> is broken here
+            out << s256FromBigEndian(di);
         }
         else if (IsUint(t))
         {
-            boost::multiprecision::uint256_t n;
-            import_big_endian(n, di);
-            out << n;
+            out << u256FromBigEndian(di);
         }
         else
         {

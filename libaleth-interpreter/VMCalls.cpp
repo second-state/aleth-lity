@@ -16,19 +16,24 @@
 */
 
 #include "VM.h"
+#include "eni/ENI.hpp"
+#include "eni/arg_converter.hpp"
+#include "eni/ret_converter.hpp"
+#include "eni/mphelpers.hpp"
 
 namespace dev
 {
 namespace eth
 {
-void VM::copyDataToMemory(bytesConstRef _data, u256*_sp)
+void VM::copyDataToMemory(bytesConstRef _data, u256* _sp)
 {
     auto offset = static_cast<size_t>(_sp[0]);
     s512 bigIndex = _sp[1];
     auto index = static_cast<size_t>(bigIndex);
     auto size = static_cast<size_t>(_sp[2]);
 
-    size_t sizeToBeCopied = bigIndex + size > _data.size() ? _data.size() < bigIndex ? 0 : _data.size() - index : size;
+    size_t sizeToBeCopied =
+        bigIndex + size > _data.size() ? _data.size() < bigIndex ? 0 : _data.size() - index : size;
 
     if (sizeToBeCopied > 0)
         std::memcpy(m_mem.data() + offset, _data.data() + index, sizeToBeCopied);
@@ -80,14 +85,15 @@ void VM::throwRevertInstruction(owning_bytes_ref&& _output)
 
 void VM::throwBufferOverrun(bigint const& _endOfAccess)
 {
-    BOOST_THROW_EXCEPTION(BufferOverrun() << RequirementError(_endOfAccess, bigint(m_returnData.size())));
+    BOOST_THROW_EXCEPTION(
+        BufferOverrun() << RequirementError(_endOfAccess, bigint(m_returnData.size())));
 }
 
 int64_t VM::verifyJumpDest(u256 const& _dest, bool _throw)
 {
     // check for overflow
-    if (_dest <= 0x7FFFFFFFFFFFFFFF) {
-
+    if (_dest <= 0x7FFFFFFFFFFFFFFF)
+    {
         // check for within bounds and to a jump destination
         // use binary search of array because hashtable collisions are exploitable
         uint64_t pc = uint64_t(_dest);
@@ -169,6 +175,51 @@ void VM::caseCreate()
 void VM::caseENI()
 {
     m_bounce = &VM::interpretCases;
+    ENI eni;
+
+    std::string funcName = toString(m_SP[0]);
+    u256 typeOffset = m_SP[1];
+    u256 dataOffset = m_SP[2];
+    int64_t argsTypeLength = (int64_t)s256FromBigEndian(m_mem.data() + (unsigned)typeOffset);
+    int64_t argsDataLength = (int64_t)s256FromBigEndian(m_mem.data() + (unsigned)dataOffset);
+
+    if (argsDataLength % 32)
+    {
+        argsDataLength += 32 - argsDataLength % 32;
+    }
+    auto argsType = std::vector<Code>(
+        (Code*)m_mem.data() + 32 + (unsigned)typeOffset, (Code*)m_mem.data() + 32 + (unsigned)typeOffset + argsTypeLength);
+    auto argsData = std::string(
+        m_mem.data() + 32 + (unsigned)dataOffset, m_mem.data() + 32 + (unsigned)dataOffset + argsDataLength);
+    auto argsText = ConvertArguments(argsType, argsData);
+
+    eni.InitENI(funcName, argsText);
+
+    auto retText = eni.ExecuteENI();
+
+    u256 retTypeOffset = typeOffset + 32 + argsTypeLength;
+    if (retTypeOffset % 32)
+    {
+        retTypeOffset += 32 - retTypeOffset % 32;
+    }
+    int64_t retTypeLength =
+        (int64_t)s256FromBigEndian(m_mem.data() + (unsigned)retTypeOffset);
+    auto retType = std::vector<Code>(
+        (Code*)m_mem.data() + 32 + (unsigned)retTypeOffset, (Code*)m_mem.data() + 32 + (unsigned)retTypeOffset + retTypeLength);
+    auto retData = ConvertReturnValue(retType, retText);
+    auto retDataOffset = dataOffset + 32 + argsDataLength;
+    auto retDataLengthBytes = toBigEndian(u256(retData.size()));
+
+    m_mem.resize((uint64_t)(retDataOffset + 32 + retData.size()));
+    std::memcpy(m_mem.data() + (uint64_t)retDataOffset, retDataLengthBytes.data(), 32);
+    std::memcpy(m_mem.data() + (uint64_t)retDataOffset + 32, retData.data(), retData.size());
+    auto nextFreeMemoryOffset = retDataOffset + 32 + retData.size();
+    if (nextFreeMemoryOffset % 32 > 0) {
+        nextFreeMemoryOffset += 32 - nextFreeMemoryOffset % 32;
+    }
+    auto nextFreeMemoryOffsetBytes = toBigEndian(nextFreeMemoryOffset);
+    std::memcpy(m_mem.data() + 0x40, nextFreeMemoryOffsetBytes.data(), 32);
+    m_SPP[0] = retDataOffset + 32;
 }
 
 void VM::caseCall()
@@ -239,10 +290,10 @@ bool VM::caseCallSetup(evmc_message& o_msg, bytesRef& o_output)
         m_runGas += VMSchedule::valueTransferGas;
 
     size_t const sizesOffset = haveValueArg ? 3 : 2;
-    u256 inputOffset  = m_SP[sizesOffset];
-    u256 inputSize    = m_SP[sizesOffset + 1];
+    u256 inputOffset = m_SP[sizesOffset];
+    u256 inputSize = m_SP[sizesOffset + 1];
     u256 outputOffset = m_SP[sizesOffset + 2];
-    u256 outputSize   = m_SP[sizesOffset + 3];
+    u256 outputSize = m_SP[sizesOffset + 3];
     uint64_t inputMemNeed = memNeed(inputOffset, inputSize);
     uint64_t outputMemNeed = memNeed(outputOffset, outputSize);
 
@@ -298,5 +349,5 @@ bool VM::caseCallSetup(evmc_message& o_msg, bytesRef& o_output)
     }
     return false;
 }
-}
-}
+}  // namespace eth
+}  // namespace dev
