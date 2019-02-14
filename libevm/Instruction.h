@@ -39,9 +39,6 @@ enum class Instruction : uint8_t
     MULMOD,       ///< unsigned modular multiplication
     EXP,          ///< exponential operation
     SIGNEXTEND,   ///< extend length of signed integer
-	SADD,         ///< signed addition operation with overflow checking
-	SMUL,         ///< signed subtraction operation with overflow checking
-	SSUB,         ///< signed multiplication operation with overflow checking
 
     LT = 0x10,  ///< less-than comparision
     GT,         ///< greater-than comparision
@@ -59,6 +56,12 @@ enum class Instruction : uint8_t
     SAR,        ///< arithmetic shift right operation
 
     SHA3 = 0x20,  ///< compute SHA3-256 hash
+
+    FMUL = 0x2a,     ///< unsigned fixed point number mul with overflow checking
+    SFMUL,           ///< signed fixed point number mul with overflow checking
+    FDIV,            ///< unsigned fixed point number div with overflow checking
+    SFDIV,           ///< signed fixed point number div with overflow checking
+
 
     ADDRESS = 0x30,  ///< get address of currently executing account
     BALANCE,         ///< get balance of the given account
@@ -186,6 +189,13 @@ enum class Instruction : uint8_t
     RETURNSUB,      ///< return to subroutine jumped from
     PUTLOCAL,       ///< pop top of stack to local variable
     GETLOCAL,       ///< push local variable to top of stack
+
+    SADD = 0xc0,    ///< signed addition operation with overflow checking
+    UADD,           ///< unsigned addition operation with overflow checking
+    SSUB,           ///< signed multiplication operation with overflow checking
+    USUB,           ///< unsigned multiplication operation with overflow checking
+    SMUL,           ///< signed subtraction operation with overflow checking
+    UMUL,           ///< unsigned subtraction operation with overflow checking
 
     XADD = 0xc1,    ///< addition operation
     XMUL,           ///< mulitplication operation

@@ -565,6 +565,7 @@ void VM::interpretCases()
         //
 
         CASE(ADD)
+        CASE(UADD)
         {
             ON_OP();
             updateIOGas();
@@ -594,6 +595,7 @@ void VM::interpretCases()
         NEXT
 
         CASE(MUL)
+        CASE(UMUL)
         {
             ON_OP();
             updateIOGas();
@@ -629,8 +631,53 @@ void VM::interpretCases()
                 result = ~ result + 1;
             m_SPP[0] = u256(result);
         }
+        NEXT
+
+        // a * b / 10**n
+        CASE(FMUL)
+        {
+            ON_OP();
+            updateIOGas();
+
+            u256 a = m_SP[0];
+            u256 b = m_SP[1];
+            u256 n = m_SP[2];
+
+            if (n >= 155) {
+                // log10(2**512) = 154.12
+                m_SPP[0] = 0;
+            } else {
+                u512 result = u512(a) * u512(b) / pow(u512(10), unsigned(n));
+                if (u256(result) != result)
+                    throwBadInstruction();
+                m_SPP[0] = u256(result);
+            }
+        }
+        NEXT
+
+        CASE(SFMUL)
+        {
+            ON_OP();
+            updateIOGas();
+
+            s256 a = u2s(m_SP[0]);
+            s256 b = u2s(m_SP[1]);
+            u256 n = m_SP[2];
+
+            if (n >= 155) {
+                // log10(2 ** 512) = 154.12
+                m_SPP[0] = 0;
+            } else {
+                s512 result = s512(a) * s512(b) / pow(s512(10), unsigned(n));
+                if (s256(result) != result)
+                    throwBadInstruction();
+                m_SPP[0] = s2u(s256(result));
+            }
+        }
+        NEXT
 
         CASE(SUB)
+        CASE(USUB)
         {
             ON_OP();
             updateIOGas();
@@ -678,6 +725,56 @@ void VM::interpretCases()
 
             m_SPP[0] = m_SP[1] ? s2u(divWorkaround(u2s(m_SP[0]), u2s(m_SP[1]))) : 0;
             --m_SP;
+        }
+        NEXT
+
+        CASE(FDIV)
+        {
+            ON_OP();
+            updateIOGas();
+
+            u256 a = m_SP[0];
+            u256 b = m_SP[1];
+            u256 n = m_SP[2];
+
+            if (a == 0) {
+                m_SPP[0] = 0;
+            } else if (n >= 155) {
+                // log10(2**512) = 154.12735777995837
+                // 10 ** 155 overflows u512 therefore overflows the result
+                throwBadInstruction();
+            } else {
+                bigint result = bigint(a) * pow(bigint(10), unsigned(n));
+                result /= b;
+                if (u256(result) != result)
+                    throwBadInstruction();
+                m_SPP[0] = u256(result);
+            }
+        }
+        NEXT
+
+        CASE(SFDIV)
+        {
+            ON_OP();
+            updateIOGas();
+
+            s256 a = u2s(m_SP[0]);
+            s256 b = u2s(m_SP[1]);
+            u256 n = m_SP[2];
+
+            if (a == 0) {
+                m_SPP[0] = 0;
+            } else if (n >= 155) {
+                // log10(2**512) = 154.12735777995837
+                // 10 ** 155 overflows u512 therefore overflows the result
+                throwBadInstruction();
+            } else {
+                bigint result = bigint(a) * pow(bigint(10), unsigned(n));
+                result /= b;
+                if (s256(result) != result)
+                    throwBadInstruction();
+                m_SPP[0] = s2u(s256(result));
+            }
         }
         NEXT
 
@@ -912,11 +1009,13 @@ void VM::interpretCases()
         }
         CONTINUE
 
+#if 0
         CASE(XADD)
         CASE(XMUL)
         CASE(XSUB)
         CASE(XDIV)
         CASE(XSDIV)
+#endif
         CASE(XMOD)
         CASE(XSMOD)
         CASE(XLT)

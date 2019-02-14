@@ -808,6 +808,19 @@ void LegacyVM::interpretCases()
         }
         NEXT
 
+		// We do not plan to support LegacyVM
+		CASE(UADD)
+		CASE(UMUL)
+		CASE(USUB)
+		CASE(FMUL)
+		CASE(SFMUL)
+		CASE(FDIV)
+		CASE(SFDIV)
+		{
+			throwBadInstruction();
+		}
+		CONTINUE
+
 #if EIP_615
         CASE(JUMPTO)
         {
@@ -1223,11 +1236,13 @@ void LegacyVM::interpretCases()
         }
         CONTINUE
 #else
+#if 0
         CASE(XADD)
         CASE(XMUL)
         CASE(XSUB)
         CASE(XDIV)
         CASE(XSDIV)
+#endif
         CASE(XMOD)
         CASE(XSMOD)
         CASE(XLT)

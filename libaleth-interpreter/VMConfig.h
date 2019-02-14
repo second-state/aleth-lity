@@ -164,9 +164,9 @@ namespace eth
         &&MULMOD,                               \
         &&EXP,                                  \
         &&SIGNEXTEND,                           \
-        &&SADD,                                 \
-        &&SMUL,                                 \
-        &&SSUB,                                 \
+        &&INVALID,                              \
+        &&INVALID,                              \
+        &&INVALID,                              \
         &&INVALID,                              \
         &&LT, /* 10, */                         \
         &&GT,                                   \
@@ -194,10 +194,10 @@ namespace eth
         &&INVALID,                              \
         &&INVALID,                              \
         &&INVALID,                              \
-        &&INVALID,                              \
-        &&INVALID,                              \
-        &&INVALID,                              \
-        &&INVALID,                              \
+        &&FMUL,                                 \
+        &&SFMUL,                                \
+        &&FDIV,                                 \
+        &&SFDIV,                                \
         &&INVALID,                              \
         &&INVALID,                              \
         &&ADDRESS, /* 30, */                    \
@@ -344,12 +344,12 @@ namespace eth
         &&INVALID,                              \
         &&INVALID,                              \
         &&INVALID,                              \
-        &&INVALID, /* C0, */                    \
-        &&XADD,                                 \
-        &&XMUL,                                 \
-        &&XSUB,                                 \
-        &&XDIV,                                 \
-        &&XSDIV,                                \
+        &&SADD, /* C0, */                       \
+        &&UADD,                                 \
+        &&SSUB,                                 \
+        &&USUB,                                 \
+        &&SMUL,                                 \
+        &&UMUL,                                 \
         &&XMOD,                                 \
         &&XSMOD,                                \
         &&INVALID,                              \
