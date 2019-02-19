@@ -31,7 +31,6 @@
 #include <libethcore/SealEngine.h>
 #include <libevm/VMFactory.h>
 #include "BlockChain.h"
-#include "Defaults.h"
 #include "ExtVM.h"
 #include "Executive.h"
 #include "TransactionQueue.h"
@@ -315,16 +314,17 @@ pair<TransactionReceipts, bool> Block::sync(BlockChain const& _bc, TransactionQu
     // TRANSACTIONS
     pair<TransactionReceipts, bool> ret;
 
-    auto ts = _tq.topTransactions(c_maxSyncTransactions, m_transactionSet);
-    ret.second = (ts.size() == c_maxSyncTransactions);	// say there's more to the caller if we hit the limit
+    Transactions transactions = _tq.topTransactions(c_maxSyncTransactions, m_transactionSet);
+    ret.second = (transactions.size() == c_maxSyncTransactions);  // say there's more to the caller
+                                                                  // if we hit the limit
 
     assert(_bc.currentHash() == m_currentBlock.parentHash());
     auto deadline =  chrono::steady_clock::now() + chrono::milliseconds(msTimeout);
 
-    for (int goodTxs = max(0, (int)ts.size() - 1); goodTxs < (int)ts.size(); )
+    for (int goodTxs = max(0, (int)transactions.size() - 1); goodTxs < (int)transactions.size();)
     {
         goodTxs = 0;
-        for (auto const& t: ts)
+        for (auto const& t : transactions)
             if (!m_transactionSet.count(t.sha3()))
             {
                 try
@@ -704,15 +704,15 @@ void Block::updateBlockhashContract()
 {
     u256 const& blockNumber = info().number();
 
-    u256 const& constantinopleForkBlock = m_sealEngine->chainParams().constantinopleForkBlock;
-    if (blockNumber == constantinopleForkBlock)
+    u256 const& forkBlock = m_sealEngine->chainParams().experimentalForkBlock;
+    if (blockNumber == forkBlock)
     {
         m_state.createContract(c_blockhashContractAddress);
         m_state.setCode(c_blockhashContractAddress, bytes(c_blockhashContractCode));
         m_state.commit(State::CommitBehaviour::KeepEmptyAccounts);
     }
 
-    if (blockNumber >= constantinopleForkBlock)
+    if (blockNumber >= forkBlock)
     {
         DummyLastBlockHashes lastBlockHashes; // assuming blockhash contract won't need BLOCKHASH itself
         Executive e(*this, lastBlockHashes);
@@ -836,8 +836,6 @@ bool Block::sealBlock(bytesConstRef _header)
 
     if (BlockHeader(_header, HeaderData).hash(WithoutSeal) != m_currentBlock.hash(WithoutSeal))
         return false;
-
-    LOG(m_loggerDetailed) << "Sealing block!";
 
     // Compile block:
     RLPStream ret;

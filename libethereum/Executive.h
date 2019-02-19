@@ -61,7 +61,9 @@ public:
     void setShowMnemonics() { m_showMnemonics = true; }
     void setOptions(DebugOptions _options) { m_options = _options; }
 
-    std::string json(bool _styled = false) const;
+    Json::Value jsonValue() const { return m_trace; }
+    std::string styledJson() const;
+    std::string multilineTrace() const;
 
     OnOpFunc onOp()
     {
@@ -199,7 +201,6 @@ private:
     TransactionException m_excepted = TransactionException::None;	///< Details if the VM's execution resulted in an exception.
     int64_t m_baseGasRequired;			///< The base amount of gas requried for executing this transaction.
     u256 m_gas = 0;						///< The gas for EVM code execution. Initial amount before go() execution, final amount after go() execution.
-    u256 m_refunded = 0;				///< The amount of gas refunded.
 
     Transaction m_t;					///< The original transaction. Set by setup().
     LogEntries m_logs;					///< The log entries created by this transaction. Set by finalize().

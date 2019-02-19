@@ -28,10 +28,9 @@
 #include <libethereum/ChainParams.h>
 #include <libethereum/Executive.h>
 #include <libethereum/LastBlockHashesFace.h>
-#include <libevm/VM.h>
 #include <libevm/VMFactory.h>
 
-#include <aleth-buildinfo.h>
+#include <aleth/buildinfo.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
@@ -47,8 +46,6 @@ namespace po = boost::program_options;
 
 namespace
 {
-unsigned const c_lineWidth = 160;
-
 int64_t maxBlockGasLimit()
 {
     static int64_t limit =
@@ -62,29 +59,6 @@ void version()
     cout << "aleth-vm " << buildinfo->project_version << "\n";
     cout << "Build: " << buildinfo->system_name << "/" << buildinfo->build_type << "\n";
     exit(0);
-}
-
-/*
-The equivalent of setlocale(LC_ALL, “C”) is called before any user code is run.
-If the user has an invalid environment setting then it is possible for the call
-to set locale to fail, so there are only two possible actions, the first is to
-throw a runtime exception and cause the program to quit (default behaviour),
-or the second is to modify the environment to something sensible (least
-surprising behaviour).
-
-The follow code produces the least surprising behaviour. It will use the user
-specified default locale if it is valid, and if not then it will modify the
-environment the process is running in to use a sensible default. This also means
-that users do not need to install language packs for their OS.
-*/
-void setDefaultOrCLocale()
-{
-#if __unix__
-    if (!std::setlocale(LC_ALL, ""))
-    {
-        setenv("LC_ALL", "C", 1);
-    }
-#endif
 }
 
 enum class Mode
@@ -349,7 +323,7 @@ int main(int argc, char** argv)
         };
     }
     else if (mode == Mode::Trace)
-        onOp = st;
+        onOp = st.onOp();
 
     Timer timer;
     executive.go(onOp);
@@ -386,7 +360,7 @@ int main(int argc, char** argv)
         }
     }
     else if (mode == Mode::Trace)
-        cout << st.json(styledJson);
+        cout << (styledJson ? st.styledJson() : st.multilineTrace());
     else if (mode == Mode::OutputOnly)
         cout << toHex(output) << '\n';
     else if (mode == Mode::Test)

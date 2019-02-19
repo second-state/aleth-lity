@@ -68,9 +68,10 @@ bool isLocalHostAddress(bi::address const& _addressToCheck);
 bool isLocalHostAddress(std::string const& _addressToCheck);
 bool isPublicAddress(bi::address const& _addressToCheck);
 bool isPublicAddress(std::string const& _addressToCheck);
+bool isAllowedAddress(bool _allowLocalDiscovery, bi::address const& _addressToCheck);
+bool isAllowedEndpoint(bool _allowLocalDiscovery, NodeIPEndpoint const& _endpointToCheck);
 
 class UPnP;
-class Capability;
 class Host;
 class Session;
 
@@ -180,23 +181,21 @@ public:
         StreamList,
         StreamInline
     };
-    
-    /// Setting true causes isAllowed to return true for all addresses. (Used by test fixtures)
-    static bool test_allowLocal;
 
     NodeIPEndpoint() = default;
-    NodeIPEndpoint(bi::address _addr, uint16_t _udp, uint16_t _tcp): address(_addr), udpPort(_udp), tcpPort(_tcp) {}
+    NodeIPEndpoint(bi::address _addr, uint16_t _udp, uint16_t _tcp)
+      : m_address(_addr), m_udpPort(_udp), m_tcpPort(_tcp)
+    {}
     NodeIPEndpoint(RLP const& _r) { interpretRLP(_r); }
 
-    operator bi::udp::endpoint() const { return bi::udp::endpoint(address, udpPort); }
-    operator bi::tcp::endpoint() const { return bi::tcp::endpoint(address, tcpPort); }
-    
-    operator bool() const { return !address.is_unspecified() && udpPort > 0 && tcpPort > 0; }
-    
-    bool isAllowed() const { return NodeIPEndpoint::test_allowLocal ? !address.is_unspecified() : isPublicAddress(address); }
+    operator bi::udp::endpoint() const { return bi::udp::endpoint(m_address, m_udpPort); }
+    operator bi::tcp::endpoint() const { return bi::tcp::endpoint(m_address, m_tcpPort); }
+
+    operator bool() const { return !m_address.is_unspecified() && m_udpPort > 0 && m_tcpPort > 0; }
 
     bool operator==(NodeIPEndpoint const& _cmp) const {
-        return address == _cmp.address && udpPort == _cmp.udpPort && tcpPort == _cmp.tcpPort;
+        return m_address == _cmp.m_address && m_udpPort == _cmp.m_udpPort &&
+               m_tcpPort == _cmp.m_tcpPort;
     }
     bool operator!=(NodeIPEndpoint const& _cmp) const {
         return !operator==(_cmp);
@@ -205,17 +204,29 @@ public:
     void streamRLP(RLPStream& _s, RLPAppend _append = StreamList) const;
     void interpretRLP(RLP const& _r);
 
-    // TODO: make private, give accessors and rename m_...
-    bi::address address;
-    uint16_t udpPort = 0;
-    uint16_t tcpPort = 0;
+    bi::address address() const { return m_address; }
+
+    void setAddress(bi::address _addr) { m_address = _addr; }
+
+    uint16_t udpPort() const { return m_udpPort; }
+
+    void setUdpPort(uint16_t _udp) { m_udpPort = _udp; }
+
+    uint16_t tcpPort() const { return m_tcpPort; }
+
+    void setTcpPort(uint16_t _tcp) { m_tcpPort = _tcp; }
+
+private:
+    bi::address m_address;
+    uint16_t m_udpPort = 0;
+    uint16_t m_tcpPort = 0;
 };
 
 struct NodeSpec
 {
     NodeSpec() {}
 
-    /// Accepts user-readable strings of the form (enode://pubkey@)host({:port,:tcpport.udpport})
+    /// Accepts user-readable strings in the form defined here: https://github.com/ethereum/wiki/wiki/enode-url-format
     NodeSpec(std::string const& _user);
 
     NodeSpec(std::string const& _addr, uint16_t _port, int _udpPort = -1):
@@ -229,6 +240,8 @@ struct NodeSpec
     NodeIPEndpoint nodeIPEndpoint() const;
 
     std::string enode() const;
+
+    bool isValid() const;
 
 private:
     std::string m_address;
@@ -264,6 +277,7 @@ public:
 
 class DeadlineOps
 {
+    // Boost deadline timer wrapper which provides thread-safety
     class DeadlineOp
     {
     public:
@@ -310,10 +324,10 @@ private:
     std::atomic<bool> m_stopped;
 };
 
+/// Simple stream output for a NodeIPEndpoint.
+std::ostream& operator<<(std::ostream& _out, NodeIPEndpoint const& _ep);
 }
     
-/// Simple stream output for a NodeIPEndpoint.
-std::ostream& operator<<(std::ostream& _out, dev::p2p::NodeIPEndpoint const& _ep);
 }
 
 /// std::hash for asio::adress

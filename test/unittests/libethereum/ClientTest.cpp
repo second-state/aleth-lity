@@ -37,21 +37,21 @@ public:
     TestClientFixture()
     {
         ChainParams chainParams;
-        chainParams.sealEngineName = "NoProof";
+        chainParams.sealEngineName = NoProof::name();
         chainParams.allowFutureBlocks = true;
 
         fs::path dir = fs::temp_directory_path();
 
         string listenIP = "127.0.0.1";
         unsigned short listenPort = 30303;
-        auto netPrefs = NetworkPreferences(listenIP, listenPort, false);
+        auto netPrefs = NetworkConfig(listenIP, listenPort, false);
         netPrefs.discovery = false;
         netPrefs.pin = false;
 
         auto nodesState = contents(dir / fs::path("network.rlp"));
         bool testingMode = true;
         m_web3.reset(new dev::WebThreeDirect(WebThreeDirect::composeClientVersion("eth"), dir, dir,
-            chainParams, WithExisting::Kill, {"eth"}, netPrefs, &nodesState, testingMode));
+            chainParams, WithExisting::Kill, netPrefs, &nodesState, testingMode));
     }
 
     dev::WebThreeDirect* getWeb3() { return m_web3.get(); }

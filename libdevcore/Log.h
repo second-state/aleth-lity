@@ -30,7 +30,6 @@
 
 namespace dev
 {
-
 /// Set the current thread's log name.
 ///
 /// It appears that there is not currently any cross-platform way of setting
@@ -54,6 +53,8 @@ namespace dev
 /// musl mailng list posting "pthread set name on MIPs" which includes the
 /// information that musl doesn't currently implement 'pthread_setname_np'
 /// https://marc.info/?l=musl&m=146171729013062&w=1
+///
+/// For better formatting it is recommended to limit thread name to max 4 characters.
 void setThreadName(std::string const& _n);
 
 /// Set the current thread's log name.
@@ -102,7 +103,7 @@ BOOST_LOG_INLINE_GLOBAL_LOGGER_CTOR_ARGS(g_traceLogger,
 // e.g. clog(VerbosityInfo, "channel") << "message";
 // Thread-safe
 BOOST_LOG_INLINE_GLOBAL_LOGGER_DEFAULT(
-    g_clogLogger, boost::log::sources::severity_channel_logger_mt<>);
+    g_clogLogger, boost::log::sources::severity_channel_logger_mt<>)
 #define clog(SEVERITY, CHANNEL)                            \
     BOOST_LOG_STREAM_WITH_PARAMS(dev::g_clogLogger::get(), \
         (boost::log::keywords::severity = SEVERITY)(boost::log::keywords::channel = CHANNEL))
@@ -119,6 +120,7 @@ struct LoggingOptions
 void setupLogging(LoggingOptions const& _options);
 
 // Simple non-thread-safe logger with fixed severity and channel for each message
+// For better formatting it is recommended to limit channel name to max 6 characters.
 using Logger = boost::log::sources::severity_channel_logger<>;
 inline Logger createLogger(int _severity, std::string const& _channel)
 {

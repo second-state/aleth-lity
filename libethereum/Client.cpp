@@ -21,11 +21,11 @@
 
 #include "Client.h"
 #include "Block.h"
-#include "Defaults.h"
-#include "EthereumHost.h"
+#include "EthereumCapability.h"
 #include "Executive.h"
 #include "SnapshotStorage.h"
 #include "TransactionQueue.h"
+#include <libdevcore/DBFactory.h>
 #include <libdevcore/Log.h>
 #include <libp2p/Host.h>
 #include <boost/filesystem.hpp>
@@ -70,11 +70,10 @@ std::ostream& dev::eth::operator<<(std::ostream& _out, ActivityReport const& _r)
     return _out;
 }
 
-Client::Client(ChainParams const& _params, int _networkID, p2p::Host* _host,
+Client::Client(ChainParams const& _params, int _networkID, p2p::Host& _host,
     std::shared_ptr<GasPricer> _gpForAdoption, fs::path const& _dbPath,
     fs::path const& _snapshotPath, WithExisting _forceAction, TransactionQueue::Limits const& _l)
-  : ClientBase(),
-    Worker("eth", 0),
+  : Worker("eth", 0),
     m_bc(_params, _dbPath, _forceAction,
         [](unsigned d, unsigned t) {
             std::cerr << "REVISING BLOCKCHAIN: Processed " << d << " of " << t << "...\r";
@@ -95,7 +94,8 @@ Client::~Client()
     terminate();
 }
 
-void Client::init(p2p::Host* _extNet, fs::path const& _dbPath, fs::path const& _snapshotDownloadPath, WithExisting _forceAction, u256 _networkId)
+void Client::init(p2p::Host& _extNet, fs::path const& _dbPath,
+    fs::path const& _snapshotDownloadPath, WithExisting _forceAction, u256 _networkId)
 {
     DEV_TIMED_FUNCTION_ABOVE(500);
 
@@ -132,12 +132,10 @@ void Client::init(p2p::Host* _extNet, fs::path const& _dbPath, fs::path const& _
     // create Ethereum capability only if we're not downloading the snapshot
     if (_snapshotDownloadPath.empty())
     {
-        auto host = _extNet->registerCapability(
-            make_shared<EthereumHost>(bc(), m_stateDB, m_tq, m_bq, _networkId));
-        m_host = host;
-
-        _extNet->addCapability(host, EthereumHost::staticName(),
-            EthereumHost::c_oldProtocolVersion);  // TODO: remove this once v61+ protocol is common
+        auto ethCapability = make_shared<EthereumCapability>(
+            _extNet.capabilityHost(), bc(), m_stateDB, m_tq, m_bq, _networkId);
+        _extNet.registerCapability(ethCapability);
+        m_host = ethCapability;
     }
 
     // create Warp capability if we either download snapshot or can give out snapshot
@@ -147,12 +145,12 @@ void Client::init(p2p::Host* _extNet, fs::path const& _dbPath, fs::path const& _
     {
         std::shared_ptr<SnapshotStorageFace> snapshotStorage(
             importedSnapshotExists ? createSnapshotStorage(importedSnapshot) : nullptr);
-        m_warpHost = _extNet->registerCapability(make_shared<WarpHostCapability>(
-            bc(), _networkId, _snapshotDownloadPath, snapshotStorage));
+        auto warpCapability = make_shared<WarpCapability>(
+            _extNet.capabilityHost(), bc(), _networkId, _snapshotDownloadPath, snapshotStorage);
+        _extNet.registerCapability(warpCapability);
+        m_warpHost = warpCapability;
     }
 
-    if (_dbPath.size())
-        Defaults::setDBPath(_dbPath);
     doWork(false);
 }
 
@@ -291,7 +289,7 @@ void Client::reopenChain(ChainParams const& _p, WithExisting _we)
 
         m_stateDB = OverlayDB();
         bc().reopen(_p, _we);
-        m_stateDB = State::openDB(Defaults::dbPath(), bc().genesisHash(), _we);
+        m_stateDB = State::openDB(db::databasePath(), bc().genesisHash(), _we);
 
         m_preSeal = bc().genesisBlock(m_stateDB);
         m_preSeal.setAuthor(_p.author);
@@ -493,9 +491,12 @@ void Client::resyncStateFromChain()
     DEV_READ_GUARDED(x_working)
         if (bc().currentHash() == m_working.info().parentHash())
             return;
-        
-    // RESTART MINING
 
+    restartMining();
+}
+
+void Client::restartMining()
+{
     bool preChanged = false;
     Block newPreMine(chainParams().accountStartNonce);
     DEV_READ_GUARDED(x_preSeal)
@@ -504,27 +505,31 @@ void Client::resyncStateFromChain()
     // TODO: use m_postSeal to avoid re-evaluating our own blocks.
     preChanged = newPreMine.sync(bc());
 
-    if (preChanged || m_postSeal.author() != m_preSeal.author())
+    DEV_READ_GUARDED(x_preSeal) DEV_READ_GUARDED(x_postSeal)
+            if (!preChanged && m_preSeal.author() == m_postSeal.author())
     {
-        DEV_WRITE_GUARDED(x_preSeal)
-            m_preSeal = newPreMine;
-        DEV_WRITE_GUARDED(x_working)
-            m_working = newPreMine;
-        DEV_READ_GUARDED(x_postSeal)
-            if (!m_postSeal.isSealed() || m_postSeal.info().hash() != newPreMine.info().parentHash())
-                for (auto const& t: m_postSeal.pending())
-                {
-                    LOG(m_loggerDetail) << "Resubmitting post-seal transaction " << t;
-                    //                      ctrace << "Resubmitting post-seal transaction " << t;
-                    auto ir = m_tq.import(t, IfDropped::Retry);
-                    if (ir != ImportResult::Success)
-                        onTransactionQueueReady();
-                }
-        DEV_READ_GUARDED(x_working) DEV_WRITE_GUARDED(x_postSeal)
-            m_postSeal = m_working;
-
-        onPostStateChanged();
+        onTransactionQueueReady();
+        return;
     }
+
+    DEV_WRITE_GUARDED(x_preSeal)
+        m_preSeal = newPreMine;
+    DEV_WRITE_GUARDED(x_working)
+        m_working = newPreMine;
+    DEV_READ_GUARDED(x_postSeal)
+        if (!m_postSeal.isSealed() || m_postSeal.info().hash() != newPreMine.info().parentHash())
+            for (auto const& t : m_postSeal.pending())
+            {
+                LOG(m_loggerDetail) << "Resubmitting post-seal transaction " << t;
+                //                      ctrace << "Resubmitting post-seal transaction " << t;
+                auto ir = m_tq.import(t, IfDropped::Retry);
+                if (ir != ImportResult::Success)
+                    onTransactionQueueReady();
+            }
+    DEV_READ_GUARDED(x_working) DEV_WRITE_GUARDED(x_postSeal)
+        m_postSeal = m_working;
+
+    onPostStateChanged();
 
     // Quick hack for now - the TQ at this point already has the prior pending transactions in it;
     // we should resync with it manually until we are stricter about what constitutes "knowing".
@@ -560,6 +565,7 @@ void Client::onChainChanged(ImportRoute const& _ir)
     if (!isMajorSyncing())
         resyncStateFromChain();
     noteChanged(changeds);
+    m_onChainChanged(_ir.deadBlocks, _ir.liveBlocks);
 }
 
 bool Client::remoteActive() const
@@ -604,6 +610,8 @@ void Client::rejigSealing()
                     LOG(m_logger) << "Tried to seal sealed block...";
                     return;
                 }
+                // TODO is that needed? we have "Generating seal on" below
+                LOG(m_loggerDetail) << "Starting to seal block #" << m_working.info().number();
                 m_working.commitToSeal(bc(), m_extraData);
             }
             DEV_READ_GUARDED(x_working)
@@ -615,11 +623,14 @@ void Client::rejigSealing()
 
             if (wouldSeal())
             {
-                sealEngine()->onSealGenerated([=](bytes const& header){
-                    if (!this->submitSealed(header))
+                sealEngine()->onSealGenerated([=](bytes const& _header) {
+                    LOG(m_logger) << "Block sealed #" << BlockHeader(_header, HeaderData).number();
+                    if (this->submitSealed(_header))
+                        m_onBlockSealed(_header);
+                    else
                         LOG(m_logger) << "Submitting block failed...";
                 });
-                ctrace << "Generating seal on" << m_sealingInfo.hash(WithoutSeal) << "#" << m_sealingInfo.number();
+                ctrace << "Generating seal on " << m_sealingInfo.hash(WithoutSeal) << " #" << m_sealingInfo.number();
                 sealEngine()->generateSeal(m_sealingInfo);
             }
         }
@@ -798,6 +809,24 @@ SyncStatus Client::syncStatus() const
     return status;
 }
 
+TransactionSkeleton Client::populateTransactionWithDefaults(TransactionSkeleton const& _t) const
+{
+    TransactionSkeleton ret(_t);
+
+    // Default gas value meets the intrinsic gas requirements of both
+    // send value and create contract transactions and is the same default
+    // value used by geth and testrpc.
+    const u256 defaultTransactionGas = 90000;
+    if (ret.nonce == Invalid256)
+        ret.nonce = max<u256>(postSeal().transactionsFrom(ret.from), m_tq.maxNonce(ret.from));
+    if (ret.gasPrice == Invalid256)
+        ret.gasPrice = gasBidPrice();
+    if (ret.gas == Invalid256)
+        ret.gas = defaultTransactionGas;
+
+    return ret;
+}
+
 bool Client::submitSealed(bytes const& _header)
 {
     bytes newBlock;
@@ -840,27 +869,43 @@ void Client::rewind(unsigned _n)
     m_bq.clear();
 }
 
-pair<h256, Address> Client::submitTransaction(TransactionSkeleton const& _t, Secret const& _secret)
+h256 Client::submitTransaction(TransactionSkeleton const& _t, Secret const& _secret)
+{
+    TransactionSkeleton ts = populateTransactionWithDefaults(_t);
+    ts.from = toAddress(_secret);
+    Transaction t(ts, _secret);
+    return importTransaction(t);
+}
+
+h256 Client::importTransaction(Transaction const& _t)
 {
     prepareForTransaction();
 
-    // Default gas value meets the intrinsic gas requirements of both
-    // send value and create contract transactions and is the same default
-    // value used by geth and testrpc.
-    const u256 defaultTransactionGas = 90000;
-    TransactionSkeleton ts(_t);
-    ts.from = toAddress(_secret);
-    if (_t.nonce == Invalid256)
-        ts.nonce = max<u256>(postSeal().transactionsFrom(ts.from), m_tq.maxNonce(ts.from));
-    if (ts.gasPrice == Invalid256)
-        ts.gasPrice = gasBidPrice();
-    if (ts.gas == Invalid256)
-        ts.gas = defaultTransactionGas;
+    // Use the Executive to perform basic validation of the transaction
+    // (e.g. transaction signature, account balance) using the state of
+    // the latest block in the client's blockchain. This can throw but
+    // we'll catch the exception at the RPC level.
+    Block currentBlock = block(bc().currentHash());
+    Executive e(currentBlock, bc());
+    e.initialize(_t);
+    ImportResult res = m_tq.import(_t.rlp());
+    switch (res)
+    {
+        case ImportResult::Success:
+            break;
+        case ImportResult::ZeroSignature:
+            BOOST_THROW_EXCEPTION(ZeroSignatureTransaction());
+        case ImportResult::OverbidGasPrice:
+            BOOST_THROW_EXCEPTION(GasPriceTooLow());
+        case ImportResult::AlreadyKnown:
+            BOOST_THROW_EXCEPTION(PendingTransactionAlreadyExists());
+        case ImportResult::AlreadyInChain:
+            BOOST_THROW_EXCEPTION(TransactionAlreadyInChain());
+        default:
+            BOOST_THROW_EXCEPTION(UnknownTransactionValidationError());
+    }
 
-    Transaction t(ts, _secret);
-    m_tq.import(t.rlp());
-
-    return make_pair(t.sha3(), toAddress(ts.from, ts.nonce));
+    return _t.sha3();
 }
 
 // TODO: remove try/catch, allow exceptions
@@ -869,7 +914,7 @@ ExecutionResult Client::call(Address const& _from, u256 _value, Address _dest, b
     ExecutionResult ret;
     try
     {
-        Block temp = block(_blockNumber);
+        Block temp = blockByNumber(_blockNumber);
         u256 nonce = max<u256>(temp.transactionsFrom(_from), m_tq.maxNonce(_from));
         u256 gas = _gas == Invalid256 ? gasLimitRemaining() : _gas;
         u256 gasPrice = _gasPrice == Invalid256 ? gasBidPrice() : _gasPrice;
@@ -881,7 +926,7 @@ ExecutionResult Client::call(Address const& _from, u256 _value, Address _dest, b
     }
     catch (...)
     {
-        // TODO: Some sort of notification of failure.
+        cwarn << boost::current_exception_diagnostic_information();
     }
     return ret;
 }

@@ -73,6 +73,7 @@ DEV_SIMPLE_EXCEPTION(MissingField);
 DEV_SIMPLE_EXCEPTION(WrongFieldType);
 DEV_SIMPLE_EXCEPTION(InterfaceNotSupported);
 DEV_SIMPLE_EXCEPTION(ExternalFunctionFailure);
+DEV_SIMPLE_EXCEPTION(WaitTimeout);
 
 // error information to be added to exceptions
 using errinfo_invalidSymbol = boost::error_info<struct tag_invalidSymbol, char>;
@@ -92,4 +93,5 @@ using errinfo_extraData = boost::error_info<struct tag_extraData, bytes>;
 using errinfo_externalFunction = boost::errinfo_api_function;
 using errinfo_interface = boost::error_info<struct tag_interface, std::string>;
 using errinfo_path = boost::error_info<struct tag_path, std::string>;
+using errinfo_nodeID = boost::error_info<struct tag_nodeID, h512>;
 }

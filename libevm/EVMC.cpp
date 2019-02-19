@@ -4,7 +4,6 @@
 #include "EVMC.h"
 
 #include <libdevcore/Log.h>
-#include <libevm/VM.h>
 #include <libevm/VMFactory.h>
 
 namespace dev
@@ -14,11 +13,40 @@ namespace eth
 EVM::EVM(evmc_instance* _instance) noexcept : m_instance(_instance)
 {
     assert(m_instance != nullptr);
-    assert(m_instance->abi_version == EVMC_ABI_VERSION);
+    assert(evmc_is_abi_compatible(m_instance));
 
     // Set the options.
     for (auto& pair : evmcOptions())
-        m_instance->set_option(m_instance, pair.first.c_str(), pair.second.c_str());
+    {
+        auto result = evmc_set_option(m_instance, pair.first.c_str(), pair.second.c_str());
+        switch (result)
+        {
+        case EVMC_SET_OPTION_SUCCESS:
+            break;
+        case EVMC_SET_OPTION_INVALID_NAME:
+            cwarn << "Unknown EVMC option '" << pair.first << "'";
+            break;
+        case EVMC_SET_OPTION_INVALID_VALUE:
+            cwarn << "Invalid value '" << pair.second << "' for EVMC option '" << pair.first << "'";
+            break;
+        default:
+            cwarn << "Unknown error when setting EVMC option '" << pair.first << "'";
+        }
+    }
+}
+
+/// Handy wrapper for evmc_execute().
+EVM::Result EVM::execute(ExtVMFace& _ext, int64_t gas)
+{
+    auto mode = toRevision(_ext.evmSchedule());
+    evmc_call_kind kind = _ext.isCreate ? EVMC_CREATE : EVMC_CALL;
+    uint32_t flags = _ext.staticCall ? EVMC_STATIC : 0;
+    assert(flags != EVMC_STATIC || kind == EVMC_CALL);  // STATIC implies a CALL.
+    evmc_message msg = {kind, flags, static_cast<int32_t>(_ext.depth), gas, toEvmC(_ext.myAddress),
+        toEvmC(_ext.caller), _ext.data.data(), _ext.data.size(), toEvmC(_ext.value),
+        toEvmC(0x0_cppui256)};
+    return EVM::Result{
+        evmc_execute(m_instance, &_ext, mode, &msg, _ext.code.data(), _ext.code.size())};
 }
 
 owning_bytes_ref EVMC::exec(u256& io_gas, ExtVMFace& _ext, const OnOpFunc& _onOp)
@@ -54,6 +82,7 @@ owning_bytes_ref EVMC::exec(u256& io_gas, ExtVMFace& _ext, const OnOpFunc& _onOp
     case EVMC_FAILURE:
         BOOST_THROW_EXCEPTION(OutOfGas());
 
+    case EVMC_INVALID_INSTRUCTION:  // NOTE: this could have its own exception
     case EVMC_UNDEFINED_INSTRUCTION:
         BOOST_THROW_EXCEPTION(BadInstruction());
 
@@ -66,6 +95,9 @@ owning_bytes_ref EVMC::exec(u256& io_gas, ExtVMFace& _ext, const OnOpFunc& _onOp
     case EVMC_STACK_UNDERFLOW:
         BOOST_THROW_EXCEPTION(StackUnderflow());
 
+    case EVMC_INVALID_MEMORY_ACCESS:
+        BOOST_THROW_EXCEPTION(BufferOverrun());
+
     case EVMC_STATIC_MODE_VIOLATION:
         BOOST_THROW_EXCEPTION(DisallowedStateChange());
 
@@ -73,12 +105,18 @@ owning_bytes_ref EVMC::exec(u256& io_gas, ExtVMFace& _ext, const OnOpFunc& _onOp
         cwarn << "Execution rejected by EVMC, executing with default VM implementation";
         return VMFactory::create(VMKind::Legacy)->exec(io_gas, _ext, _onOp);
 
+    case EVMC_INTERNAL_ERROR:
     default:
-        BOOST_THROW_EXCEPTION(InternalVMError{} << errinfo_evmcStatusCode(r.status()));
+        if (r.status() <= EVMC_INTERNAL_ERROR)
+            BOOST_THROW_EXCEPTION(InternalVMError{} << errinfo_evmcStatusCode(r.status()));
+        else
+            // These cases aren't really internal errors, just more specific
+            // error codes returned by the VM. Map all of them to OOG.
+            BOOST_THROW_EXCEPTION(OutOfGas());
     }
 }
 
-evmc_revision toRevision(EVMSchedule const& _schedule)
+evmc_revision EVM::toRevision(EVMSchedule const& _schedule)
 {
     if (_schedule.haveCreate2)
         return EVMC_CONSTANTINOPLE;

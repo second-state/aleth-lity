@@ -142,9 +142,6 @@ using u256HashMap = std::unordered_map<u256, u256>;
 // String types.
 using strings = std::vector<std::string>;
 
-// Fixed-length string types.
-using string32 = std::array<char, 32>;
-
 // Null/Invalid values for convenience.
 extern bytes const NullBytes;
 u256 constexpr Invalid256 =
@@ -302,4 +299,20 @@ enum class WithExisting: int
 /// Get the current time in seconds since the epoch in UTC
 int64_t utcTime();
 
-}
+void setDefaultOrCLocale();
+
+static constexpr unsigned c_lineWidth = 160;
+
+class ExitHandler
+{
+public:
+    static void exitHandler(int) { s_shouldExit = true; }
+    bool shouldExit() const { return s_shouldExit; }
+
+private:
+    static bool s_shouldExit;
+};
+
+bool isTrue(std::string const& _m);
+bool isFalse(std::string const& _m);
+}  // namespace dev

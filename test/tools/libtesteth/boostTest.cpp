@@ -59,27 +59,27 @@ void customTestSuite()
     if (opt.singleTestFile.is_initialized())
     {
         boost::filesystem::path file(opt.singleTestFile.get());
-        if (opt.rCurrentTestSuite.find_first_of("GeneralStateTests") != std::string::npos)
+        if (opt.rCurrentTestSuite.find("GeneralStateTests") != std::string::npos)
         {
             dev::test::StateTestSuite suite;
             suite.runTestWithoutFiller(file);
         }
-        else if (opt.rCurrentTestSuite.find_first_of("BlockchainTests") != std::string::npos)
+        else if (opt.rCurrentTestSuite.find("BlockchainTests") != std::string::npos)
         {
             dev::test::BlockchainTestSuite suite;
             suite.runTestWithoutFiller(file);
         }
-        else if (opt.rCurrentTestSuite.find_first_of("TransitionTests") != std::string::npos)
+        else if (opt.rCurrentTestSuite.find("TransitionTests") != std::string::npos)
         {
             dev::test::TransitionTestsSuite suite;
             suite.runTestWithoutFiller(file);
         }
-        else if (opt.rCurrentTestSuite.find_first_of("VMtests") != std::string::npos)
+        else if (opt.rCurrentTestSuite.find("VMtests") != std::string::npos)
         {
             dev::test::VmTestSuite suite;
             suite.runTestWithoutFiller(file);
         }
-        else if (opt.rCurrentTestSuite.find_first_of("TransactionTests") != std::string::npos)
+        else if (opt.rCurrentTestSuite.find("TransactionTests") != std::string::npos)
         {
             dev::test::TransactionTestSuite suite;
             suite.runTestWithoutFiller(file);
@@ -97,29 +97,6 @@ void travisOut(std::atomic_bool* _stopTravisOut)
         if (tickCounter % 10 == 0)
             std::cout << ".\n" << std::flush;  // Output dot every 10s.
     }
-}
-
-/*
-The equivalent of setlocale(LC_ALL, “C”) is called before any user code is run.
-If the user has an invalid environment setting then it is possible for the call
-to set locale to fail, so there are only two possible actions, the first is to
-throw a runtime exception and cause the program to quit (default behaviour),
-or the second is to modify the environment to something sensible (least
-surprising behaviour).
-
-The follow code produces the least surprising behaviour. It will use the user
-specified default locale if it is valid, and if not then it will modify the
-environment the process is running in to use a sensible default. This also means
-that users do not need to install language packs for their OS.
-*/
-void setDefaultOrCLocale()
-{
-#if __unix__
-    if (!std::setlocale(LC_ALL, ""))
-    {
-        setenv("LC_ALL", "C", 1);
-    }
-#endif
 }
 
 // Custom Boost Unit Test Main

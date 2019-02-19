@@ -19,85 +19,80 @@ along with cpp-ethereum.  If not, see <http://www.gnu.org/licenses/>.
 * @date May 2015
 */
 
-#include <boost/test/unit_test.hpp>
-#include <chrono>
-#include <thread>
+#include <libp2p/Capability.h>
+#include <libp2p/CapabilityHost.h>
 #include <libp2p/Common.h>
 #include <libp2p/Host.h>
 #include <libp2p/Session.h>
-#include <libp2p/Capability.h>
-#include <libp2p/HostCapability.h>
-#include <test/tools/libtesteth/TestOutputHelper.h>
 #include <test/tools/libtesteth/Options.h>
+#include <test/tools/libtesteth/TestOutputHelper.h>
+#include <boost/test/unit_test.hpp>
+#include <chrono>
+#include <thread>
 
 using namespace std;
 using namespace dev;
 using namespace dev::test;
 using namespace dev::p2p;
 
-struct P2PFixture: public TestOutputHelperFixture
-{
-    P2PFixture() { dev::p2p::NodeIPEndpoint::test_allowLocal = true; }
-    ~P2PFixture() { dev::p2p::NodeIPEndpoint::test_allowLocal = false; }
-};
-
-class TestCapability: public Capability
+class TestCapability : public CapabilityFace, public Worker
 {
 public:
-    TestCapability(std::shared_ptr<SessionFace> _s, HostCapabilityFace* _h, unsigned _idOffset, CapDesc const&): Capability(_s, _h, _idOffset), m_cntReceivedMessages(0), m_testSum(0) {}
-    virtual ~TestCapability() {}
-    int countReceivedMessages() { return m_cntReceivedMessages; }
-    int testSum() { return m_testSum; }
-    static std::string name() { return "test"; }
-    static u256 version() { return 2; }
-    static unsigned messageCount() { return UserPacket + 1; }
-    void sendTestMessage(int _i) { RLPStream s; sealAndSend(prep(s, UserPacket, 1) << _i); }
+    explicit TestCapability(Host const& _host) : Worker("test"), m_host(_host) {}
 
-protected:
-    virtual bool interpret(unsigned _id, RLP const& _r) override;
+    std::string name() const override { return "test"; }
+    u256 version() const override { return 2; }
+    unsigned messageCount() const override { return UserPacket + 1; }
 
-    int m_cntReceivedMessages;
-    int m_testSum;
-};
+    void onStarting() override {}
+    void onStopping() override {}
 
-bool TestCapability::interpret(unsigned _id, RLP const& _r) 
-{
-    //cnote << "Capability::interpret(): custom message received";
-    ++m_cntReceivedMessages;
-    m_testSum += _r[0].toInt();
-    BOOST_ASSERT(_id == UserPacket);
-    return (_id == UserPacket);
-}
-
-class TestHostCapability: public HostCapability<TestCapability>, public Worker
-{
-public:
-    TestHostCapability(): Worker("test") {}
-    virtual ~TestHostCapability() {}
+    void onConnect(NodeID const& _nodeID, u256 const&) override
+    {
+        m_cntReceivedMessages[_nodeID] = 0;
+        m_testSums[_nodeID] = 0;
+    }
+    bool interpretCapabilityPacket(NodeID const& _nodeID, unsigned _id, RLP const& _r) override
+    {
+        // cnote << "Capability::interpret(): custom message received";
+        ++m_cntReceivedMessages[_nodeID];
+        m_testSums[_nodeID] += _r[0].toInt();
+        BOOST_ASSERT(_id == UserPacket);
+        return (_id == UserPacket);
+    }
+    void onDisconnect(NodeID const& _nodeID) override
+    {
+        m_cntReceivedMessages.erase(_nodeID);
+        m_testSums.erase(_nodeID);
+    }
 
     void sendTestMessage(NodeID const& _id, int _x)
     {
-        for (auto i: peerSessions())
-            if (_id == i.second->id)
-                capabilityFromSession<TestCapability>(*i.first)->sendTestMessage(_x);
+        RLPStream s;
+        m_host.capabilityHost()->sealAndSend(
+            _id, m_host.capabilityHost()->prep(_id, name(), s, UserPacket, 1) << _x);
     }
 
     std::pair<int, int> retrieveTestData(NodeID const& _id)
     { 
         int cnt = 0;
         int checksum = 0;
-        for (auto i: peerSessions())
-            if (_id == i.second->id)
+        for (auto i : m_cntReceivedMessages)
+            if (_id == i.first)
             {
-                cnt += capabilityFromSession<TestCapability>(*i.first)->countReceivedMessages();
-                checksum += capabilityFromSession<TestCapability>(*i.first)->testSum();
+                cnt += i.second;
+                checksum += m_testSums[_id];
             }
 
         return std::pair<int, int>(cnt, checksum);
     }
+
+    Host const& m_host;
+    std::unordered_map<NodeID, int> m_cntReceivedMessages;
+    std::unordered_map<NodeID, int> m_testSums;
 };
 
-BOOST_FIXTURE_TEST_SUITE(p2pCapability, P2PFixture)
+BOOST_FIXTURE_TEST_SUITE(p2pCapability, TestOutputHelperFixture)
 
 BOOST_AUTO_TEST_CASE(capability)
 {
@@ -105,12 +100,14 @@ BOOST_AUTO_TEST_CASE(capability)
 
     int const step = 10;
     const char* const localhost = "127.0.0.1";
-    NetworkPreferences prefs1(localhost, 0, false);
-    NetworkPreferences prefs2(localhost, 0, false);
+    NetworkConfig prefs1(localhost, 0, false /* upnp */, true /* allow local discovery */);
+    NetworkConfig prefs2(localhost, 0, false /* upnp */, true /* allow local discovery */);
     Host host1("Test", prefs1);
     Host host2("Test", prefs2);
-    auto thc1 = host1.registerCapability(make_shared<TestHostCapability>());
-    auto thc2 = host2.registerCapability(make_shared<TestHostCapability>());
+    auto thc1 = make_shared<TestCapability>(host1);
+    host1.registerCapability(thc1);
+    auto thc2 = make_shared<TestCapability>(host2);
+    host2.registerCapability(thc2);
     host1.start();	
     host2.start();
     auto port1 = host1.listenPort();

@@ -22,12 +22,11 @@
 
 #include "Session.h"
 
-#include <chrono>
+#include "Host.h"
 #include <libdevcore/Common.h>
 #include <libdevcore/CommonIO.h>
 #include <libdevcore/Exceptions.h>
-#include "Host.h"
-#include "Capability.h"
+#include <chrono>
 
 using namespace std;
 using namespace dev;
@@ -59,7 +58,7 @@ Session::~Session()
     // Read-chain finished for one reason or another.
     for (auto& i : m_capabilities)
     {
-        i.second->onDisconnect();
+        i.second->onDisconnect(id());
         i.second.reset();
     }
 
@@ -116,27 +115,39 @@ template <class T> vector<T> randomSelection(vector<T> const& _t, unsigned _n)
     return ret;
 }
 
-bool Session::readPacket(uint16_t _capId, PacketType _t, RLP const& _r)
+bool Session::readPacket(uint16_t _capId, PacketType _packetType, RLP const& _r)
 {
     m_lastReceived = chrono::steady_clock::now();
-    clog(VerbosityTrace, "net") << "-> " << _t << " " << _r;
+    clog(VerbosityTrace, "net") << "-> " << _packetType << " " << _r;
     try // Generic try-catch block designed to capture RLP format errors - TODO: give decent diagnostics, make a bit more specific over what is caught.
     {
         // v4 frame headers are useless, offset packet type used
         // v5 protocol type is in header, packet type not offset
-        if (_capId == 0 && _t < UserPacket)
-            return interpret(_t, _r);
+        if (_capId == 0 && _packetType < UserPacket)
+            return interpret(_packetType, _r);
 
-        for (auto const& i: m_capabilities)
-            if (_t >= (int)i.second->m_idOffset && _t - i.second->m_idOffset < i.second->hostCapability()->messageCount())
-                return i.second->m_enabled ? i.second->interpret(_t - i.second->m_idOffset, _r) : true;
+        for (auto const& cap : m_capabilities)
+        {
+            auto const& name = cap.first.first;
+            auto const& capability = cap.second;
+
+            if (canHandle(name, capability->messageCount(), _packetType))
+            {
+                if (!capabilityEnabled(name))
+                    return true;
+
+                auto offset = capabilityOffset(name);
+                assert(offset);
+                return capability->interpretCapabilityPacket(id(), _packetType - *offset, _r);
+            }
+        }
 
         return false;
     }
     catch (std::exception const& _e)
     {
         cnetlog << "Exception caught in p2p::Session::interpret(): " << _e.what()
-                << ". PacketType: " << _t << ". RLP: " << _r;
+                << ". PacketType: " << _packetType << ". RLP: " << _r;
         disconnect(BadProtocol);
         return true;
     }
@@ -431,10 +442,33 @@ bool Session::checkRead(std::size_t _expected, boost::system::error_code _ec, st
     return true;
 }
 
-void Session::registerCapability(CapDesc const& _desc, std::shared_ptr<Capability> _p)
+void Session::registerCapability(
+    CapDesc const& _desc, unsigned _offset, std::shared_ptr<CapabilityFace> _p)
 {
     DEV_GUARDED(x_framing)
     {
-        m_capabilities[_desc] = _p;
+        m_capabilities[_desc] = move(_p);
+        m_capabilityOffsets[_desc.first] = _offset;
     }
+}
+
+bool Session::canHandle(
+    std::string const& _capability, unsigned _messageCount, unsigned _packetType) const
+{
+    auto const offset = capabilityOffset(_capability);
+
+    return offset && _packetType >= *offset && _packetType < _messageCount + *offset;
+}
+
+void Session::disableCapability(std::string const& _capabilityName, std::string const& _problem)
+{
+    cnetdetails << "DISABLE: Disabling capability '" << _capabilityName
+                << "'. Reason: " << _problem;
+    m_disabledCapabilities.insert(_capabilityName);
+}
+
+boost::optional<unsigned> Session::capabilityOffset(std::string const& _capabilityName) const
+{
+    auto it = m_capabilityOffsets.find(_capabilityName);
+    return it == m_capabilityOffsets.end() ? boost::optional<unsigned>{} : it->second;
 }

@@ -27,7 +27,7 @@
 #include "ClientBase.h"
 #include "CommonNet.h"
 #include "StateImporter.h"
-#include "WarpHostCapability.h"
+#include "WarpCapability.h"
 #include <libdevcore/Common.h>
 #include <libdevcore/CommonIO.h>
 #include <libdevcore/Guards.h>
@@ -53,6 +53,7 @@ namespace eth
 
 class Client;
 class DownloadMan;
+class EthereumCapability;
 
 enum ClientWorkState
 {
@@ -75,23 +76,17 @@ std::ostream& operator<<(std::ostream& _out, ActivityReport const& _r);
 class Client: public ClientBase, protected Worker
 {
 public:
-    Client(
-        ChainParams const& _params,
-        int _networkID,
-        p2p::Host* _host,
+    Client(ChainParams const& _params, int _networkID, p2p::Host& _host,
         std::shared_ptr<GasPricer> _gpForAdoption,
         boost::filesystem::path const& _dbPath = boost::filesystem::path(),
         boost::filesystem::path const& _snapshotPath = boost::filesystem::path(),
         WithExisting _forceAction = WithExisting::Trust,
-        TransactionQueue::Limits const& _l = TransactionQueue::Limits{1024, 1024}
-    );
+        TransactionQueue::Limits const& _l = TransactionQueue::Limits{1024, 1024});
     /// Destructor.
     virtual ~Client();
 
     /// Get information on this chain.
     ChainParams const& chainParams() const { return bc().chainParams(); }
-
-    ImportResult injectTransaction(bytes const& _rlp, IfDropped _id = IfDropped::Ignore) override { prepareForTransaction(); return m_tq.import(_rlp, _id); }
 
     /// Resets the gas pricer to some other object.
     void setGasPricer(std::shared_ptr<GasPricer> _gp) { m_gp = _gp; }
@@ -99,7 +94,10 @@ public:
 
     /// Submits the given transaction.
     /// @returns the new transaction's hash.
-    std::pair<h256, Address> submitTransaction(TransactionSkeleton const& _t, Secret const& _secret) override;
+    h256 submitTransaction(TransactionSkeleton const& _t, Secret const& _secret) override;
+    
+    /// Imports the given transaction into the transaction queue
+    h256 importTransaction(Transaction const& _t) override;
 
     /// Makes the given call. Nothing is recorded into the state.
     ExecutionResult call(Address const& _secret, u256 _value, Address _dest, bytes const& _data, u256 _gas, u256 _gasPrice, BlockNumber _blockNumber, FudgeFactor _ff = FudgeFactor::Strict) override;
@@ -130,9 +128,11 @@ public:
     BlockQueueStatus blockQueueStatus() const { return m_bq.status(); }
     /// Get some information on the block syncing.
     SyncStatus syncStatus() const override;
+    /// Populate the uninitialized fields in the supplied transaction with default values
+    TransactionSkeleton populateTransactionWithDefaults(TransactionSkeleton const& _t) const override;
     /// Get the block queue.
     BlockQueue const& blockQueue() const { return m_bq; }
-    /// Get the block queue.
+    /// Get the state database.
     OverlayDB const& stateDB() const { return m_stateDB; }
     /// Get some information on the transaction queue.
     TransactionQueue::Status transactionQueueStatus() const { return m_tq.status(); }
@@ -145,7 +145,12 @@ public:
     // Note: "mining"/"miner" is deprecated. Use "sealing"/"sealer".
 
     Address author() const override { ReadGuard l(x_preSeal); return m_preSeal.author(); }
-    void setAuthor(Address const& _us) override { WriteGuard l(x_preSeal); m_preSeal.setAuthor(_us); }
+    void setAuthor(Address const& _us) override
+    {
+        DEV_WRITE_GUARDED(x_preSeal)
+            m_preSeal.setAuthor(_us);
+        restartMining();
+    }
 
     /// Type of sealers available for this seal engine.
     strings sealers() const { return sealEngine()->sealers(); }
@@ -211,10 +216,23 @@ public:
     /// should be called after the constructor of the most derived class finishes.
     void startWorking() { Worker::startWorking(); };
 
+    /// Change the function that is called when a new block is sealed
+    Handler<bytes const&> setOnBlockSealed(std::function<void(bytes const&)> _handler)
+    {
+        return m_onBlockSealed.add(_handler);
+    }
+    /// Change the function that is called when blockchain was changed
+    Handler<h256s const&, h256s const&> setOnChainChanged(
+        std::function<void(h256s const&, h256s const&)> _handler)
+    {
+        return m_onChainChanged.add(_handler);
+    }
+
+
 protected:
     /// Perform critical setup functions.
     /// Must be called in the constructor of the finally derived class.
-    void init(p2p::Host* _extNet, boost::filesystem::path const& _dbPath,
+    void init(p2p::Host& _extNet, boost::filesystem::path const& _dbPath,
         boost::filesystem::path const& _snapshotPath, WithExisting _forceAction, u256 _networkId);
 
     /// InterfaceStub methods
@@ -264,6 +282,8 @@ protected:
 
     /// Called after processing blocks by onChainChanged(_ir)
     void resyncStateFromChain();
+    /// Update m_preSeal, m_working, m_postSeal blocks from the latest state of the chain
+    void restartMining();
 
     /// Clear working state of transactions
     void resetState();
@@ -316,12 +336,12 @@ protected:
     Block m_working;                        ///< The state of the client which we're sealing (i.e. it'll have all the rewards added), while we're actually working on it.
     BlockHeader m_sealingInfo;              ///< The header we're attempting to seal on (derived from m_postSeal).
     bool remoteActive() const;              ///< Is there an active and valid remote worker?
-    bool m_remoteWorking = false;           ///< Has the remote worker recently been reset?
+    std::atomic<bool> m_remoteWorking = { false };          ///< Has the remote worker recently been reset?
     std::atomic<bool> m_needStateReset = { false };         ///< Need reset working state to premin on next sync
     std::chrono::system_clock::time_point m_lastGetWork;    ///< Is there an active and valid remote worker?
 
-    std::weak_ptr<EthereumHost> m_host;     ///< Our Ethereum Host. Don't do anything if we can't lock.
-    std::weak_ptr<WarpHostCapability> m_warpHost;
+    std::weak_ptr<EthereumCapability> m_host;
+    std::weak_ptr<WarpCapability> m_warpHost;
 
     std::condition_variable m_signalled;
     Mutex x_signalled;
@@ -330,7 +350,7 @@ protected:
     Handler<h256 const&> m_tqReplaced;
     Handler<> m_bqReady;
 
-    bool m_wouldSeal = false;               ///< True if we /should/ be sealing.
+    std::atomic<bool> m_wouldSeal = { false };               ///< True if we /should/ be sealing.
     bool m_wouldButShouldnot = false;       ///< True if the last time we called rejigSealing wouldSeal() was true but sealer's shouldSeal() was false.
 
     mutable std::chrono::system_clock::time_point m_lastGarbageCollection;
@@ -349,6 +369,11 @@ protected:
     std::atomic<bool> m_syncBlockQueue = {false};
 
     bytes m_extraData;
+
+    Signal<bytes const&> m_onBlockSealed;        ///< Called if we have sealed a new block
+
+    /// Called when blockchain was changed
+    Signal<h256s const&, h256s const&> m_onChainChanged;
 
     Logger m_logger{createLogger(VerbosityInfo, "client")};
     Logger m_loggerDetail{createLogger(VerbosityDebug, "client")};

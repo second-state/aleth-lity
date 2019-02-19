@@ -28,6 +28,8 @@
 #include <json/json.h>
 #include <boost/timer.hpp>
 
+#include <numeric>
+
 using namespace std;
 using namespace dev;
 using namespace dev::eth;
@@ -161,9 +163,20 @@ void StandardTrace::operator()(uint64_t _steps, uint64_t PC, Instruction inst, b
     m_trace.append(r);
 }
 
-string StandardTrace::json(bool _styled) const
+std::string StandardTrace::styledJson() const
 {
-    return _styled ? Json::StyledWriter().write(m_trace) : Json::FastWriter().write(m_trace);
+    return Json::StyledWriter().write(m_trace);
+}
+
+string StandardTrace::multilineTrace() const
+{
+    if (m_trace.empty())
+        return {};
+
+    // Each opcode trace on a separate line
+    return std::accumulate(std::next(m_trace.begin()), m_trace.end(),
+        Json::FastWriter().write(m_trace[0]),
+        [](std::string a, Json::Value b) { return a + Json::FastWriter().write(b); });
 }
 
 Executive::Executive(Block& _s, BlockChain const& _bc, unsigned _level):
@@ -283,7 +296,8 @@ bool Executive::call(CallParameters const& _p, u256 const& _gasPrice, Address co
         // FIXME: changelog contains unrevertable balance change that paid
         //        for the transaction.
         // Increment associated nonce for sender.
-        if (_p.senderAddress != MaxAddress || m_envInfo.number() < m_sealEngine.chainParams().constantinopleForkBlock) // EIP86
+        if (_p.senderAddress != MaxAddress ||
+            m_envInfo.number() < m_sealEngine.chainParams().experimentalForkBlock)  // EIP86
             m_s.incNonce(_p.senderAddress);
     }
 
@@ -296,14 +310,14 @@ bool Executive::call(CallParameters const& _p, u256 const& _gasPrice, Address co
         {
             m_excepted = TransactionException::OutOfGasBase;
             // Bail from exception.
-            
+
             // Empty precompiled contracts need to be deleted even in case of OOG
             // because the bug in both Geth and Parity led to deleting RIPEMD precompiled in this case
             // see https://github.com/ethereum/go-ethereum/pull/3341/files#diff-2433aa143ee4772026454b8abd76b9dd
             // We mark the account as touched here, so that is can be removed among other touched empty accounts (after tx finalization)
             if (m_envInfo.number() >= m_sealEngine.chainParams().EIP158ForkBlock)
                 m_s.addBalance(_p.codeAddress, 0);
-            
+
             return true;	// true actually means "all finished - nothing more to be done regarding go().
         }
         else
@@ -355,13 +369,14 @@ bool Executive::createOpcode(Address const& _sender, u256 const& _endowment, u25
 
 bool Executive::create2Opcode(Address const& _sender, u256 const& _endowment, u256 const& _gasPrice, u256 const& _gas, bytesConstRef _init, Address const& _origin, u256 const& _salt)
 {
-    m_newAddress = right160(sha3(_sender.asBytes() + toBigEndian(_salt) + sha3(_init).asBytes()));
+    m_newAddress = right160(sha3(bytes{0xff} +_sender.asBytes() + toBigEndian(_salt) + sha3(_init)));
     return executeCreate(_sender, _endowment, _gasPrice, _gas, _init, _origin);
 }
 
 bool Executive::executeCreate(Address const& _sender, u256 const& _endowment, u256 const& _gasPrice, u256 const& _gas, bytesConstRef _init, Address const& _origin)
 {
-    if (_sender != MaxAddress || m_envInfo.number() < m_sealEngine.chainParams().constantinopleForkBlock) // EIP86
+    if (_sender != MaxAddress ||
+        m_envInfo.number() < m_sealEngine.chainParams().experimentalForkBlock)  // EIP86
         m_s.incNonce(_sender);
 
     m_savepoint = m_s.savepoint();
@@ -391,6 +406,8 @@ bool Executive::executeCreate(Address const& _sender, u256 const& _endowment, u2
     if (m_envInfo.number() >= m_sealEngine.chainParams().EIP158ForkBlock)
         newNonce += 1;
     m_s.setNonce(m_newAddress, newNonce);
+
+    m_s.clearStorage(m_newAddress);
 
     // Schedule _init execution if not empty.
     if (!_init.empty())
@@ -434,7 +451,6 @@ bool Executive::go(OnOpFunc const& _onOp)
             auto vm = VMFactory::create();
             if (m_isCreation)
             {
-                m_s.clearStorage(m_ext->myAddress);
                 auto out = vm->exec(m_gas, *m_ext, _onOp);
                 if (m_res)
                 {
@@ -482,14 +498,16 @@ bool Executive::go(OnOpFunc const& _onOp)
         }
         catch (InternalVMError const& _e)
         {
-            cwarn << "Internal VM Error (" << *boost::get_error_info<errinfo_evmcStatusCode>(_e) << ")\n"
-                  << diagnostic_information(_e);
+            cerror << "Internal VM Error (EVMC status code: "
+                 << *boost::get_error_info<errinfo_evmcStatusCode>(_e) << ")";
+            revert();
             throw;
         }
         catch (Exception const& _e)
         {
             // TODO: AUDIT: check that this can never reasonably happen. Consider what to do if it does.
-            cwarn << "Unexpected exception in VM. There may be a bug in this implementation. " << diagnostic_information(_e);
+            cerror << "Unexpected exception in VM. There may be a bug in this implementation. "
+                 << diagnostic_information(_e);
             exit(1);
             // Another solution would be to reject this transaction, but that also
             // has drawbacks. Essentially, the amount of ram has to be increased here.
@@ -497,7 +515,7 @@ bool Executive::go(OnOpFunc const& _onOp)
         catch (std::exception const& _e)
         {
             // TODO: AUDIT: check that this can never reasonably happen. Consider what to do if it does.
-            cwarn << "Unexpected std::exception in VM. Not enough RAM? " << _e.what();
+            cerror << "Unexpected std::exception in VM. Not enough RAM? " << _e.what();
             exit(1);
             // Another solution would be to reject this transaction, but that also
             // has drawbacks. Essentially, the amount of ram has to be increased here.
@@ -516,14 +534,16 @@ bool Executive::go(OnOpFunc const& _onOp)
 
 bool Executive::finalize()
 {
-    // Accumulate refunds for suicides.
     if (m_ext)
+    {
+        // Accumulate refunds for suicides.
         m_ext->sub.refunds += m_ext->evmSchedule().suicideRefundGas * m_ext->sub.suicides.size();
 
-    // SSTORE refunds...
-    // must be done before the miner gets the fees.
-    m_refunded = m_ext ? min((m_t.gas() - m_gas) / 2, m_ext->sub.refunds) : 0;
-    m_gas += m_refunded;
+        // Refunds must be applied before the miner gets the fees.
+        assert(m_ext->sub.refunds >= 0);
+        int64_t maxRefund = (static_cast<int64_t>(m_t.gas()) - static_cast<int64_t>(m_gas)) / 2;
+        m_gas += min(maxRefund, m_ext->sub.refunds);
+    }
 
     if (m_t)
     {

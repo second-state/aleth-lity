@@ -21,6 +21,7 @@
 
 #include "Common.h"
 #include "Network.h"
+#include <regex>
 using namespace std;
 using namespace dev;
 using namespace dev::p2p;
@@ -32,8 +33,6 @@ static_assert(dev::p2p::c_protocolVersion == 4, "Replace v3 compatbility with v4
 const dev::p2p::NodeIPEndpoint dev::p2p::UnspecifiedNodeIPEndpoint = NodeIPEndpoint(bi::address(), 0, 0);
 const dev::p2p::Node dev::p2p::UnspecifiedNode = dev::p2p::Node(NodeID(), UnspecifiedNodeIPEndpoint);
 
-bool dev::p2p::NodeIPEndpoint::test_allowLocal = false;
-
 bool p2p::isPublicAddress(std::string const& _addressToCheck)
 {
     return _addressToCheck.empty() ? false : isPublicAddress(bi::address::from_string(_addressToCheck));
@@ -42,6 +41,17 @@ bool p2p::isPublicAddress(std::string const& _addressToCheck)
 bool p2p::isPublicAddress(bi::address const& _addressToCheck)
 {
     return !(isPrivateAddress(_addressToCheck) || isLocalHostAddress(_addressToCheck));
+}
+
+bool p2p::isAllowedAddress(bool _allowLocalDiscovery, bi::address const& _addressToCheck)
+{
+    return _allowLocalDiscovery ? !_addressToCheck.is_unspecified() :
+                                  isPublicAddress(_addressToCheck);
+}
+
+bool p2p::isAllowedEndpoint(bool _allowLocalDiscovery, NodeIPEndpoint const& _endpointToCheck)
+{
+    return isAllowedAddress(_allowLocalDiscovery, _endpointToCheck.address());
 }
 
 // Helper function to determine if an address falls within one of the reserved ranges
@@ -122,25 +132,25 @@ void NodeIPEndpoint::streamRLP(RLPStream& _s, RLPAppend _append) const
 {
     if (_append == StreamList)
         _s.appendList(3);
-    if (address.is_v4())
-        _s << bytesConstRef(&address.to_v4().to_bytes()[0], 4);
-    else if (address.is_v6())
-        _s << bytesConstRef(&address.to_v6().to_bytes()[0], 16);
+    if (m_address.is_v4())
+        _s << bytesConstRef(&m_address.to_v4().to_bytes()[0], 4);
+    else if (m_address.is_v6())
+        _s << bytesConstRef(&m_address.to_v6().to_bytes()[0], 16);
     else
         _s << bytes();
-    _s << udpPort << tcpPort;
+    _s << m_udpPort << m_tcpPort;
 }
 
 void NodeIPEndpoint::interpretRLP(RLP const& _r)
 {
     if (_r[0].size() == 4)
-        address = bi::address_v4(*(bi::address_v4::bytes_type*)_r[0].toBytes().data());
+        m_address = bi::address_v4(*(bi::address_v4::bytes_type*)_r[0].toBytes().data());
     else if (_r[0].size() == 16)
-        address = bi::address_v6(*(bi::address_v6::bytes_type*)_r[0].toBytes().data());
+        m_address = bi::address_v6(*(bi::address_v6::bytes_type*)_r[0].toBytes().data());
     else
-        address = bi::address();
-    udpPort = _r[1].toInt<uint16_t>();
-    tcpPort = _r[2].toInt<uint16_t>();
+        m_address = bi::address();
+    m_udpPort = _r[1].toInt<uint16_t>();
+    m_tcpPort = _r[2].toInt<uint16_t>();
 }
 
 void DeadlineOps::reap()
@@ -180,25 +190,26 @@ Node::Node(NodeSpec const& _s, PeerType _p):
 
 NodeSpec::NodeSpec(string const& _user)
 {
-    m_address = _user;
-    if (m_address.substr(0, 8) == "enode://" && m_address.find('@') == 136)
+    // Format described here: https://github.com/ethereum/wiki/wiki/enode-url-format
+    // Example valid URLs:
+    //      enode://6332792c4a00e3e4ee0926ed89e0d27ef985424d97b6a45bf0f23e51f0dcb5e66b875777506458aea7af6f9e4ffb69f43f3778ee73c81ed9d34c51c4b16b0b0f@52.232.243.152:30305
+    //      enode://6332792c4a00e3e4ee0926ed89e0d27ef985424d97b6a45bf0f23e51f0dcb5e66b875777506458aea7af6f9e4ffb69f43f3778ee73c81ed9d34c51c4b16b0b0f@52.232.243.152:30305?discport=30303
+    //      enode://6332792c4a00e3e4ee0926ed89e0d27ef985424d97b6a45bf0f23e51f0dcb5e66b875777506458aea7af6f9e4ffb69f43f3778ee73c81ed9d34c51c4b16b0b0f@52.232.243.152
+    const char* peerPattern = "^(enode://)([\\dabcdef]{128})@(\\d{1,3}.\\d{1,3}.\\d{1,3}.\\d{1,3})((:\\d{2,5})(\\?discport=(\\d{2,5}))?)?$";
+    regex rx(peerPattern);
+    smatch match;
+
+    m_tcpPort = m_udpPort = c_defaultListenPort;
+    if (regex_match(_user, match, rx))
     {
-        m_id = p2p::NodeID(m_address.substr(8, 128));
-        m_address = m_address.substr(137);
-    }
-    size_t colon = m_address.find_first_of(":");
-    if (colon != string::npos)
-    {
-        string ports = m_address.substr(colon + 1);
-        m_address = m_address.substr(0, colon);
-        size_t p2 = ports.find_first_of(".");
-        if (p2 != string::npos)
+        m_id = p2p::NodeID(match.str(2));
+        m_address = match.str(3);
+        if (match[5].matched)
         {
-            m_udpPort = stoi(ports.substr(p2 + 1));
-            m_tcpPort = stoi(ports.substr(0, p2));
+            m_udpPort = m_tcpPort = stoi(match.str(5).substr(1));
+            if (match[7].matched)
+                m_udpPort = stoi(match.str(7));
         }
-        else
-            m_tcpPort = m_udpPort = stoi(ports);
     }
 }
 
@@ -212,26 +223,32 @@ std::string NodeSpec::enode() const
     string ret = m_address;
 
     if (m_tcpPort)
+    {
         if (m_udpPort && m_tcpPort != m_udpPort)
-            ret += ":" + toString(m_tcpPort) + "." + toString(m_udpPort);
+            ret += ":" + toString(m_tcpPort) + "?discport=" + toString(m_udpPort);
         else
             ret += ":" + toString(m_tcpPort);
-    else if (m_udpPort)
-        ret += ":" + toString(m_udpPort);
-
+    }
+   
     if (m_id)
         return "enode://" + m_id.hex() + "@" + ret;
     return ret;
 }
 
-namespace dev
+bool NodeSpec::isValid() const
 {
-    
-std::ostream& operator<<(std::ostream& _out, dev::p2p::NodeIPEndpoint const& _ep)
-{
-    _out << _ep.address << _ep.udpPort << _ep.tcpPort;
-    return _out;
+    return m_id && !m_address.empty();
 }
 
+namespace dev
+{
+namespace p2p
+{
+std::ostream& operator<<(std::ostream& _out, NodeIPEndpoint const& _ep)
+{
+    _out << _ep.address() << " UDP " << _ep.udpPort() << " TCP " << _ep.tcpPort();
+    return _out;
+}
+}  // namespace p2p
 }
 

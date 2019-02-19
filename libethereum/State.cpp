@@ -23,11 +23,10 @@
 
 #include "Block.h"
 #include "BlockChain.h"
-#include "Defaults.h"
 #include "ExtVM.h"
 #include "TransactionQueue.h"
 #include <libdevcore/Assertions.h>
-#include <libdevcore/DBImpl.h>
+#include <libdevcore/DBFactory.h>
 #include <libdevcore/TrieHash.h>
 #include <libevm/VMFactory.h>
 #include <boost/filesystem.hpp>
@@ -37,21 +36,6 @@ using namespace std;
 using namespace dev;
 using namespace dev::eth;
 namespace fs = boost::filesystem;
-
-namespace
-{
-
-/// @returns true when normally halted; false when exceptionally halted.
-bool executeTransaction(Executive& _e, Transaction const& _t, OnOpFunc const& _onOp)
-{
-    _e.initialize(_t);
-
-    if (!_e.execute())
-        _e.go(_onOp);
-    return _e.finalize();
-}
-
-}
 
 State::State(u256 const& _accountStartNonce, OverlayDB const& _db, BaseState _bs):
     m_db(_db),
@@ -75,28 +59,33 @@ State::State(State const& _s):
 
 OverlayDB State::openDB(fs::path const& _basePath, h256 const& _genesisHash, WithExisting _we)
 {
-    fs::path path = _basePath.empty() ? Defaults::get()->m_dbPath : _basePath;
+    fs::path path = _basePath.empty() ? db::databasePath() : _basePath;
 
-    if (_we == WithExisting::Kill)
+    if (db::isDiskDatabase() && _we == WithExisting::Kill)
     {
         clog(VerbosityDebug, "statedb") << "Killing state database (WithExisting::Kill).";
         fs::remove_all(path / fs::path("state"));
     }
 
     path /= fs::path(toHex(_genesisHash.ref().cropped(0, 4))) / fs::path(toString(c_databaseVersion));
-    fs::create_directories(path);
-    DEV_IGNORE_EXCEPTIONS(fs::permissions(path, fs::owner_all));
+    if (db::isDiskDatabase())
+    {
+        fs::create_directories(path);
+        DEV_IGNORE_EXCEPTIONS(fs::permissions(path, fs::owner_all));
+    }
 
     try
     {
-        std::unique_ptr<db::DatabaseFace> db(new db::DBImpl(path / fs::path("state")));
+		std::unique_ptr<db::DatabaseFace> db = db::DBFactory::create(path / fs::path("state"));
         clog(VerbosityTrace, "statedb") << "Opened state DB.";
         return OverlayDB(std::move(db));
     }
     catch (boost::exception const& ex)
     {
         cwarn << boost::diagnostic_information(ex) << '\n';
-        if (fs::space(path / fs::path("state")).available < 1024)
+        if (!db::isDiskDatabase())
+            throw;
+        else if (fs::space(path / fs::path("state")).available < 1024)
         {
             cwarn << "Not enough available space found on hard drive. Please free some up and then re-run. Bailing.";
             BOOST_THROW_EXCEPTION(NotEnoughAvailableSpace());
@@ -230,7 +219,7 @@ unordered_map<Address, u256> State::addresses() const
             ret[i.first] = RLP(i.second)[1].toInt<u256>();
     return ret;
 #else
-    BOOST_THROW_EXCEPTION(InterfaceNotSupported("State::addresses()"));
+    BOOST_THROW_EXCEPTION(InterfaceNotSupported() << errinfo_interface("State::addresses()"));
 #endif
 }
 
@@ -240,6 +229,7 @@ std::pair<State::AddressMap, h256> State::addresses(
     AddressMap addresses;
     h256 nextKey;
 
+#if ETH_FATDB
     for (auto it = m_state.hashedLowerBound(_beginHash); it != m_state.hashedEnd(); ++it)
     {
         auto const address = Address(it.key());
@@ -260,6 +250,7 @@ std::pair<State::AddressMap, h256> State::addresses(
         h256 const hashedAddress((*it).first);
         addresses[hashedAddress] = address;
     }
+#endif
 
     // get addresses from cache with hash >= _beginHash (both new and old touched, we can't
     // distinguish them) and order by hash
@@ -286,6 +277,7 @@ std::pair<State::AddressMap, h256> State::addresses(
 
     return {addresses, nextKey};
 }
+
 
 void State::setRoot(h256 const& _r)
 {
@@ -430,18 +422,7 @@ u256 State::getNonce(Address const& _addr) const
 u256 State::storage(Address const& _id, u256 const& _key) const
 {
     if (Account const* a = account(_id))
-    {
-        auto mit = a->storageOverlay().find(_key);
-        if (mit != a->storageOverlay().end())
-            return mit->second;
-
-        // Not in the storage cache - go to the DB.
-        SecureTrieDB<h256, OverlayDB> memdb(const_cast<OverlayDB*>(&m_db), a->baseRoot());          // promise we won't change the overlay! :)
-        string payload = memdb.at(_key);
-        u256 ret = payload.size() ? RLP(payload).toInt<u256>() : 0;
-        a->setStorageCache(_key, ret);
-        return ret;
-    }
+        return a->storageValue(_key, m_db);
     else
         return 0;
 }
@@ -450,6 +431,14 @@ void State::setStorage(Address const& _contract, u256 const& _key, u256 const& _
 {
     m_changeLog.emplace_back(_contract, _key, storage(_contract, _key));
     m_cache[_contract].setStorage(_key, _value);
+}
+
+u256 State::originalStorageValue(Address const& _contract, u256 const& _key) const
+{
+    if (Account const* a = account(_contract))
+        return a->originalStorageValue(_key, m_db);
+    else
+        return 0;
 }
 
 void State::clearStorage(Address const& _contract)
@@ -463,6 +452,7 @@ void State::clearStorage(Address const& _contract)
 
 map<h256, pair<u256, u256>> State::storage(Address const& _id) const
 {
+#if ETH_FATDB
     map<h256, pair<u256, u256>> ret;
 
     if (Account const* a = account(_id))
@@ -493,6 +483,10 @@ map<h256, pair<u256, u256>> State::storage(Address const& _id) const
         }
     }
     return ret;
+#else
+    (void) _id;
+    BOOST_THROW_EXCEPTION(InterfaceNotSupported() << errinfo_interface("State::storage(Address const& _id)"));
+#endif
 }
 
 h256 State::storageRoot(Address const& _id) const
@@ -611,15 +605,9 @@ std::pair<ExecutionResult, TransactionReceipt> State::execute(EnvInfo const& _en
 
     auto onOp = _onOp;
 #if ETH_VMTRACE
-	// Run the existing onOp function and the tracer
-	onOp = [&_onOp, &e](uint64_t _steps, uint64_t PC, Instruction inst, bigint
-			newMemSize, bigint gasCost, bigint gas, VMFace const* _vm,
-			ExtVMFace const* voidExt) {
-		_onOp(_steps, PC, inst, newMemSize, gasCost, gas, _vm, voidExt);
-		e.simpleTrace();
-	};
+    if (!onOp)
+        onOp = e.simpleTrace();
 #endif
-
     u256 const startGasUsed = _envInfo.gasUsed();
     bool const statusCode = executeTransaction(e, _t, onOp);
 
@@ -654,6 +642,26 @@ void State::executeBlockTransactions(Block const& _block, unsigned _txCount, Las
         executeTransaction(e, _block.pending()[i], OnOpFunc());
 
         gasUsed += e.gasUsed();
+    }
+}
+
+/// @returns true when normally halted; false when exceptionally halted; throws when internal VM
+/// exception occurred.
+bool State::executeTransaction(Executive& _e, Transaction const& _t, OnOpFunc const& _onOp)
+{
+    size_t const savept = savepoint();
+    try
+    {
+        _e.initialize(_t);
+
+        if (!_e.execute())
+            _e.go(_onOp);
+        return _e.finalize();
+    }
+    catch (Exception const&)
+    {
+        rollback(savept);
+        throw;
     }
 }
 
@@ -798,4 +806,4 @@ AddressHash dev::eth::commit(AccountMap const& _cache, SecureTrieDB<Address, DB>
 
 
 template AddressHash dev::eth::commit<OverlayDB>(AccountMap const& _cache, SecureTrieDB<Address, OverlayDB>& _state);
-template AddressHash dev::eth::commit<MemoryDB>(AccountMap const& _cache, SecureTrieDB<Address, MemoryDB>& _state);
+template AddressHash dev::eth::commit<StateCacheDB>(AccountMap const& _cache, SecureTrieDB<Address, StateCacheDB>& _state);

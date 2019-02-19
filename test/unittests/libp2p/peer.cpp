@@ -20,66 +20,57 @@
  * Peer Network test functions.
  */
 
-#include <test/tools/libtesteth/TestOutputHelper.h>
-#include <test/tools/libtesteth/Options.h>
-#include <libp2p/Host.h>
 #include <libp2p/Capability.h>
-#include <libp2p/HostCapability.h>
+#include <libp2p/Host.h>
+#include <test/tools/libtesteth/Options.h>
+#include <test/tools/libtesteth/TestOutputHelper.h>
+#include <boost/test/unit_test.hpp>
 #include <chrono>
 #include <thread>
-#include <boost/test/unit_test.hpp>
 
 using namespace std;
 using namespace dev;
 using namespace dev::test;
 using namespace dev::p2p;
 
-struct P2PPeerFixture: public TestOutputHelperFixture
-{
-    P2PPeerFixture() { dev::p2p::NodeIPEndpoint::test_allowLocal = true; }
-    ~P2PPeerFixture() { dev::p2p::NodeIPEndpoint::test_allowLocal = false; }
-};
-
-class TestCap: public Capability
+class TestCap : public CapabilityFace, public Worker
 {
 public:
-    TestCap(std::shared_ptr<SessionFace> _s, HostCapabilityFace* _h, unsigned _idOffset, CapDesc const&): Capability(_s, _h, _idOffset) {}
-    virtual ~TestCap() {}
-    static std::string name() { return "p2pTestCapability"; }
-    static u256 version() { return 2; }
-    static unsigned messageCount() { return UserPacket + 1; }
+    std::string name() const override { return "p2pTestCapability"; }
+    u256 version() const override { return 2; }
+    unsigned messageCount() const override { return UserPacket + 1; }
 
-protected:
-    virtual bool interpret(unsigned _id, RLP const& _r) override { return _id > 0 || _r.size() > 0; }
-};
+    void onStarting() override {}
+    void onStopping() override {}
 
-class TestHostCap: public HostCapability<TestCap>, public Worker
-{
-public:
-    TestHostCap(): Worker("test") {}
-    virtual ~TestHostCap() {}
+    void onConnect(NodeID const&, u256 const&) override {}
+    bool interpretCapabilityPacket(NodeID const&, unsigned _id, RLP const& _r) override
+    {
+        return _id > 0 || _r.size() > 0;
+    }
+    void onDisconnect(NodeID const&) override {}
 };
 
 BOOST_AUTO_TEST_SUITE(libp2p)
-BOOST_FIXTURE_TEST_SUITE(p2p, P2PPeerFixture)
+BOOST_FIXTURE_TEST_SUITE(p2p, TestOutputHelperFixture)
 
 BOOST_AUTO_TEST_CASE(host)
 {
-    Host host1("Test", NetworkPreferences("127.0.0.1", 0, false));
+    Host host1("Test", NetworkConfig("127.0.0.1", 0, false /* upnp */, true /* allow local discovery */));
     host1.start();
     auto host1port = host1.listenPort();
     BOOST_REQUIRE(host1port);
 
-    Host host2("Test", NetworkPreferences("127.0.0.1", 0, false));
+    Host host2("Test", NetworkConfig("127.0.0.1", 0, false /* upnp */, true /* allow local discovery */));
     host2.start();
     auto host2port = host2.listenPort();
     BOOST_REQUIRE(host2port);
     
     BOOST_REQUIRE_NE(host1port, host2port);
 
-    host1.registerCapability(make_shared<TestHostCap>());
-    host2.registerCapability(make_shared<TestHostCap>());
-    
+    host1.registerCapability(make_shared<TestCap>());
+    host2.registerCapability(make_shared<TestCap>());
+
     auto node2 = host2.id();
     int const step = 10;
 
@@ -121,10 +112,10 @@ BOOST_AUTO_TEST_CASE(host)
 
 BOOST_AUTO_TEST_CASE(networkConfig)
 {
-    Host save("Test", NetworkPreferences(false));
+    Host save("Test", NetworkConfig(false));
     bytes store(save.saveNetwork());
     
-    Host restore("Test", NetworkPreferences(false), bytesConstRef(&store));
+    Host restore("Test", NetworkConfig(false), bytesConstRef(&store));
     BOOST_REQUIRE(save.id() == restore.id());
 }
 
@@ -138,7 +129,7 @@ BOOST_AUTO_TEST_CASE(saveNodes)
 
     for (unsigned i = 0; i < c_nodes; ++i)
     {
-        Host* h = new Host("Test", NetworkPreferences("127.0.0.1", 0, false));
+        Host* h = new Host("Test", NetworkConfig("127.0.0.1", 0, false /* upnp */, true /* allow local discovery */));
         h->setIdealPeerCount(10);		
         h->start(); // starting host is required so listenport is available
         while (!h->haveNetwork())
@@ -147,7 +138,7 @@ BOOST_AUTO_TEST_CASE(saveNodes)
         BOOST_REQUIRE(h->listenPort());
         bool inserted = ports.insert(h->listenPort()).second;
         BOOST_REQUIRE(inserted);
-        h->registerCapability(make_shared<TestHostCap>());
+        h->registerCapability(make_shared<TestCap>());
         hosts.push_back(h);
     }
     
@@ -190,14 +181,14 @@ BOOST_AUTO_TEST_CASE(saveNodes)
 
 BOOST_AUTO_TEST_SUITE_END()
 
-BOOST_FIXTURE_TEST_SUITE(p2pPeer, P2PPeerFixture)
+BOOST_FIXTURE_TEST_SUITE(p2pPeer, TestOutputHelperFixture)
 
 BOOST_AUTO_TEST_CASE(requirePeer)
 {
     unsigned const step = 10;
     const char* const localhost = "127.0.0.1";
-    NetworkPreferences prefs1(localhost, 0, false);
-    NetworkPreferences prefs2(localhost, 0, false);
+    NetworkConfig prefs1(localhost, 0, false /* upnp */, true /* allow local discovery */);
+    NetworkConfig prefs2(localhost, 0, false /* upnp */, true /* allow local discovery */);
     Host host1("Test", prefs1);
     Host host2("Test", prefs2);
     host1.start();
@@ -209,8 +200,8 @@ BOOST_AUTO_TEST_CASE(requirePeer)
     BOOST_REQUIRE(port2);
     BOOST_REQUIRE_NE(port1, port2);
 
-    host1.registerCapability(make_shared<TestHostCap>());
-    host2.registerCapability(make_shared<TestHostCap>());
+    host1.registerCapability(make_shared<TestCap>());
+    host2.registerCapability(make_shared<TestCap>());
 
     host1.requirePeer(node2, NodeIPEndpoint(bi::address::from_string(localhost), port2, port2));
 
@@ -308,7 +299,7 @@ int peerTest(int argc, char** argv)
             remoteHost = argv[i];
     }
 
-    Host ph("Test", NetworkPreferences(listenPort));
+    Host ph("Test", NetworkConfig(listenPort));
 
     if (!remoteHost.empty() && !remoteAlias)
         ph.addNode(remoteAlias, NodeIPEndpoint(bi::address::from_string(remoteHost), remotePort, remotePort));

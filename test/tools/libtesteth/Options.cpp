@@ -18,6 +18,7 @@
  * Class for handling testeth custom options
  */
 
+#include <libdevcore/DBFactory.h>
 #include <libevm/VMFactory.h>
 #include <libweb3jsonrpc/Debug.h>
 #include <test/tools/fuzzTesting/fuzzHelper.h>
@@ -28,6 +29,7 @@
 
 using namespace std;
 using namespace dev::test;
+using namespace dev::db;
 using namespace dev::eth;
 
 namespace
@@ -61,13 +63,14 @@ void printHelp()
     cout << "\nTest Generation\n";
     cout << setw(30) << "--filltests" << setw(25) << "Run test fillers\n";
     cout << setw(30) << "--fillchain" << setw(25) << "When filling the state tests, fill tests as blockchain instead\n";
+    cout << setw(30) << "--showhash" << setw(25) << "Show filler hash debug information\n";
     cout << setw(30) << "--randomcode <MaxOpcodeNum>" << setw(25) << "Generate smart random EVM code\n";
     cout << setw(30) << "--createRandomTest" << setw(25) << "Create random test and output it to the console\n";
     cout << setw(30) << "--createRandomTest <PathToOptions.json>" << setw(25) << "Use following options file for random code generation\n";
     cout << setw(30) << "--seed <uint>" << setw(25) << "Define a seed for random test\n";
     cout << setw(30) << "--options <PathTo.json>" << setw(25) << "Use following options file for random code generation\n";
     //cout << setw(30) << "--fulloutput" << setw(25) << "Disable address compression in the output field\n";
-
+    cout << setw(30) << "--db <name> (=memorydb)" << setw(25) << "Use the supplied database for the block and state databases. Valid options: leveldb, rocksdb, memorydb\n";
     cout << setw(30) << "--help" << setw(25) << "Display list of command arguments\n";
     cout << setw(30) << "--version" << setw(25) << "Display build information\n";
 }
@@ -123,6 +126,7 @@ Options::Options(int argc, const char** argv)
     trGasIndex = -1;
     trValueIndex = -1;
     bool seenSeparator = false; // true if "--" has been seen.
+    setDatabaseKind(DatabaseKind::MemoryDB); // default to MemoryDB in the interest of reduced test execution time
     for (auto i = 0; i < argc; ++i)
     {
         auto arg = std::string{argv[i]};
@@ -157,11 +161,20 @@ Options::Options(int argc, const char** argv)
             printVersion();
             exit(0);
         }
-        else if (arg == "--vm" || arg == "--evmc")
+        else if (arg == "--vm")
         {
             // Skip VM options because they are handled by vmProgramOptions().
             throwIfNoArgumentFollows();
             ++i;
+        }
+        else if (arg == "--evmc")
+        {
+            // Skip VM options because they are handled by vmProgramOptions().
+            throwIfNoArgumentFollows();
+
+            // --evmc is a multitoken option so skip all tokens.
+            while (i + 1 < argc && argv[i + 1][0] != '-')
+                ++i;
         }
         else if (arg == "--vmtrace")
         {
@@ -186,6 +199,8 @@ Options::Options(int argc, const char** argv)
             filltests = true;
         else if (arg == "--fillchain")
             fillchain = true;
+        else if (arg == "--showhash")
+            showhash = true;
         else if (arg == "--stats")
         {
             throwIfNoArgumentFollows();
@@ -310,10 +325,15 @@ Options::Options(int argc, const char** argv)
         else if (arg == "--seed")
         {
             throwIfNoArgumentFollows();
-            u256 input = toInt(argv[++i]);
+            u256 input = toU256(argv[++i]);
             if (input > std::numeric_limits<uint64_t>::max())
                 BOOST_WARN("Seed is > u64. Using u64_max instead.");
             randomTestSeed = static_cast<uint64_t>(min<u256>(std::numeric_limits<uint64_t>::max(), input));
+        }
+        else if (arg == "--db")
+        {
+            throwIfNoArgumentFollows();
+            setDatabaseKindByName(argv[++i]);
         }
         else if (seenSeparator)
         {
@@ -322,7 +342,7 @@ Options::Options(int argc, const char** argv)
         }
     }
 
-    //check restrickted options
+    //check restricted options
     if (createRandomTest)
     {
         if (trValueIndex >= 0 || trGasIndex >= 0 || trDataIndex >= 0 || singleTest || all ||

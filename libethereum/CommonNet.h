@@ -23,10 +23,11 @@
 
 #pragma once
 
-#include <string>
-#include <chrono>
 #include <libdevcore/Common.h>
 #include <libdevcore/Log.h>
+#include <libp2p/Common.h>
+#include <chrono>
+#include <string>
 
 namespace dev
 {
@@ -46,7 +47,7 @@ static const unsigned c_maxReceipts = c_maxBlocks; ///< Maximum number of receip
 
 class BlockChain;
 class TransactionQueue;
-class EthereumHost;
+class EthereumCapability;
 class EthereumPeer;
 
 enum SubprotocolPacketType: byte
@@ -101,5 +102,6 @@ struct SyncStatus
     bool majorSyncing = false;
 };
 
+using NodeID = p2p::NodeID;
 }
 }

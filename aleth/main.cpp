@@ -14,17 +14,11 @@
     You should have received a copy of the GNU General Public License
     along with cpp-ethereum.  If not, see <http://www.gnu.org/licenses/>.
 */
-/**
- * @file main.cpp
- * @author Gav Wood <i@gavwood.com>
- * @author Tasha Carl <tasha@carl.pro> - I here by place all my contributions in this file under MIT licence, as specified by http://opensource.org/licenses/MIT.
- * @date 2014
- * Ethereum client.
- */
 
 #include <thread>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <signal.h>
 
 #include <boost/algorithm/string.hpp>
@@ -37,13 +31,12 @@
 #include <libethashseal/EthashClient.h>
 #include <libethashseal/GenesisInfo.h>
 #include <libethcore/KeyManager.h>
-#include <libethereum/Defaults.h>
+#include <libdevcore/DBFactory.h>
 #include <libethereum/SnapshotImporter.h>
 #include <libethereum/SnapshotStorage.h>
-#include <libevm/VM.h>
 #include <libevm/VMFactory.h>
 #include <libwebthree/WebThree.h>
-
+#include <libethashseal/Ethash.h>
 #include <libdevcrypto/LibSnark.h>
 
 #include <libweb3jsonrpc/AccountHolder.h>
@@ -61,7 +54,7 @@
 #include "MinerAux.h"
 #include "AccountManager.h"
 
-#include <aleth-buildinfo.h>
+#include <aleth/buildinfo.h>
 
 using namespace std;
 using namespace dev;
@@ -74,16 +67,6 @@ namespace
 {
 
 std::atomic<bool> g_silence = {false};
-unsigned const c_lineWidth = 160;
-
-string ethCredits(bool _interactive = false)
-{
-    std::ostringstream cout;
-    if (_interactive)
-        cout
-            << "Type 'exit' to quit\n\n";
-    return credits() + cout.str();
-}
 
 void version()
 {
@@ -94,40 +77,11 @@ void version()
     cout << "Build: " << buildinfo->system_name << "/" << buildinfo->build_type << "\n";
 }
 
-/*
-The equivalent of setlocale(LC_ALL, “C”) is called before any user code is run.
-If the user has an invalid environment setting then it is possible for the call
-to set locale to fail, so there are only two possible actions, the first is to
-throw a runtime exception and cause the program to quit (default behaviour),
-or the second is to modify the environment to something sensible (least
-surprising behaviour).
-
-The follow code produces the least surprising behaviour. It will use the user
-specified default locale if it is valid, and if not then it will modify the
-environment the process is running in to use a sensible default. This also means
-that users do not need to install language packs for their OS.
-*/
-void setDefaultOrCLocale()
-{
-#if __unix__
-    if (!std::setlocale(LC_ALL, ""))
-    {
-        setenv("LC_ALL", "C", 1);
-    }
-#endif
-}
-
 void importPresale(KeyManager& _km, string const& _file, function<string()> _pass)
 {
     KeyPair k = _km.presaleSecret(contentsString(_file), [&](bool){ return _pass(); });
     _km.import(k.secret(), "Presale wallet" + _file + " (insecure)");
 }
-
-enum class NodeMode
-{
-    PeerServer,
-    Full
-};
 
 enum class OperationMode
 {
@@ -160,19 +114,6 @@ void stopSealingAfterXBlocks(eth::Client* _c, unsigned _start, unsigned& io_mini
 
     this_thread::sleep_for(chrono::milliseconds(100));
 }
-
-class ExitHandler
-{
-public:
-    static void exitHandler(int) { s_shouldExit = true; }
-    bool shouldExit() const { return s_shouldExit; }
-
-private:
-    static bool s_shouldExit;
-};
-
-bool ExitHandler::s_shouldExit = false;
-
 }
 
 int main(int argc, char** argv)
@@ -183,7 +124,6 @@ int main(int argc, char** argv)
     toPublic({});
 
     // Init defaults
-    Defaults::get();
     Ethash::init();
     NoProof::init();
 
@@ -199,9 +139,6 @@ int main(int argc, char** argv)
     string exportTo = "latest";
     Format exportFormat = Format::Binary;
 
-    /// General params for Node operation
-    NodeMode nodeMode = NodeMode::Full;
-
     bool ipc = true;
 
     string jsonAdmin;
@@ -213,17 +150,18 @@ int main(int argc, char** argv)
 
     /// Networking params.
     string listenIP;
-    unsigned short listenPort = 30303;
+    unsigned short listenPort = dev::p2p::c_defaultIPPort;
     string publicIP;
     string remoteHost;
-    unsigned short remotePort = 30303;
+    unsigned short remotePort = dev::p2p::c_defaultIPPort;
 
     unsigned peers = 11;
     unsigned peerStretch = 7;
-    std::map<NodeID, pair<NodeIPEndpoint,bool>> preferredNodes;
+    std::map<p2p::NodeID, pair<NodeIPEndpoint, bool>> preferredNodes;
     bool bootstrap = true;
     bool disableDiscovery = false;
     bool enableDiscovery = false;
+    bool allowLocalDiscovery = false;
     static const unsigned NoNetworkID = (unsigned)-1;
     unsigned networkID = NoNetworkID;
 
@@ -270,7 +208,7 @@ int main(int argc, char** argv)
     }
 
 
-    MinerCLI m(MinerCLI::OperationMode::None);
+    MinerCLI miner(MinerCLI::OperationMode::None);
 
     bool listenSet = false;
     bool chainConfigIsSet = false;
@@ -285,8 +223,6 @@ int main(int argc, char** argv)
     addClientOption("test", "Testing mode; disable PoW and provide test rpc interface");
     addClientOption("config", po::value<string>()->value_name("<file>"),
         "Configure specialised blockchain using given JSON information\n");
-    addClientOption("mode,o", po::value<string>()->value_name("<full/peer>"),
-        "Start a full node or a peer node (default: full)\n");
     addClientOption("ipc", "Enable IPC server (default: on)");
     addClientOption("ipcpath", po::value<string>()->value_name("<path>"),
         "Set .ipc socket path (default: data directory)");
@@ -352,14 +288,25 @@ int main(int argc, char** argv)
         "Connect to the given remote port (default: 30303)");
     addNetworkingOption("network-id", po::value<unsigned>()->value_name("<n>"),
         "Only connect to other hosts with this network id");
+    addNetworkingOption("allow-local-discovery", po::bool_switch(&allowLocalDiscovery),
+        "Include local addresses in the discovery process. Used for testing purposes.");
 #if ETH_MINIUPNPC
     addNetworkingOption(
         "upnp", po::value<string>()->value_name("<on/off>"), "Use UPnP for NAT (default: on)");
 #endif
-    addNetworkingOption("peerset", po::value<string>()->value_name("<list>"),
-        "Space delimited list of peers; element format: type:publickey@ipAddress[:port]\n        "
-        "Types:\n        default     Attempt connection when no other peers are available and "
-        "pinning is disabled\n        required    Keep connected at all times\n");
+
+    stringstream peersetDescriptionStream;
+    peersetDescriptionStream << "Comma delimited list of peers; element format: type:enode://publickey@ipAddress[:port[?discport=port]]\n"
+        "        Types:\n"
+        "        default     Attempt connection when no other peers are available and pinning is disabled\n"
+        "        required    Keep connected at all times\n\n"
+        "        Ports:\n"
+        "        The first port argument is the tcp port used for direct communication among peers. If the second port\n"
+        "        argument isn't supplied, the first port argument will also be the udp port used for node discovery.\n"
+        "        If neither the first nor second port arguments are supplied, a default port of " << dev::p2p::c_defaultIPPort << " will be used for\n"
+        "        both peer communication and node discovery.";
+    string peersetDescription = peersetDescriptionStream.str();
+    addNetworkingOption("peerset", po::value<string>()->value_name("<list>"), peersetDescription.c_str());
     addNetworkingOption("no-discovery", "Disable node discovery; implies --no-bootstrap");
     addNetworkingOption("pin", "Only accept or connect to trusted peers\n");
 
@@ -394,44 +341,42 @@ int main(int argc, char** argv)
 
     po::options_description generalOptions("GENERAL OPTIONS", c_lineWidth);
     auto addGeneralOption = generalOptions.add_options();
-    addGeneralOption("db-path,d", po::value<string>()->value_name("<path>"),
-        ("Load database from path (default: " + getDataDir().string() + ")").c_str());
+    addGeneralOption("data-dir,d", po::value<string>()->value_name("<path>"),
+        ("Load configuration files and keystore from path (default: " + getDataDir().string() + ")").c_str());
     addGeneralOption("version,V", "Show the version and exit");
     addGeneralOption("help,h", "Show this help message and exit\n");
 
     po::options_description vmOptions = vmProgramOptions(c_lineWidth);
-
+    po::options_description dbOptions = db::databaseProgramOptions(c_lineWidth);
+    po::options_description minerOptions = MinerCLI::createProgramOptions(c_lineWidth);
 
     po::options_description allowedOptions("Allowed options");
     allowedOptions.add(clientDefaultMode)
         .add(clientTransacting)
         .add(clientMining)
+        .add(minerOptions)
         .add(clientNetworking)
         .add(importExportMode)
         .add(vmOptions)
+        .add(dbOptions)
         .add(loggingProgramOptions)
         .add(generalOptions);
 
     po::variables_map vm;
-    vector<string> unrecognisedOptions;
+
     try
     {
-        po::parsed_options parsed = po::command_line_parser(argc, argv).options(allowedOptions).allow_unregistered().run();
-        unrecognisedOptions = collect_unrecognized(parsed.options, po::include_positional);
+        po::parsed_options parsed = po::parse_command_line(argc, argv, allowedOptions);
         po::store(parsed, vm);
         po::notify(vm);
     }
     catch (po::error const& e)
     {
-        cerr << e.what();
+        cerr << e.what() << "\n";
         return -1;
     }
-    for (size_t i = 0; i < unrecognisedOptions.size(); ++i)
-        if (!m.interpretOption(i, unrecognisedOptions))
-        {
-            cerr << "Invalid argument: " << unrecognisedOptions[i] << "\n";
-            return -1;
-        }
+
+    miner.interpretOptions(vm);
 
     if (vm.count("import-snapshot"))
     {
@@ -454,76 +399,43 @@ int main(int argc, char** argv)
         peers = vm["peers"].as<int>();
     if (vm.count("peer-stretch"))
         peerStretch = vm["peer-stretch"].as<int>();
+
     if (vm.count("peerset"))
     {
-        string peerset = vm["peerset"].as<string>();
-        if (peerset.empty())
+        string peersetStr = vm["peerset"].as<string>();
+        vector<string> peersetList;
+        boost::split(peersetList, peersetStr, boost::is_any_of(","));
+        bool parsingError = false;
+        const string peerPattern = "^(default|required):(.*)";
+        regex rx(peerPattern);
+        smatch match;
+        for (auto const& p : peersetList)
         {
-            cerr << "--peerset argument must not be empty";
-            return -1;
-        }
-
-        vector<string> each;
-        boost::split(each, peerset, boost::is_any_of("\t "));
-        for (auto const& p: each)
-        {
-            string type;
-            string pubk;
-            string hostIP;
-            unsigned short port = c_defaultListenPort;
-
-            // type:key@ip[:port]
-            vector<string> typeAndKeyAtHostAndPort;
-            boost::split(typeAndKeyAtHostAndPort, p, boost::is_any_of(":"));
-            if (typeAndKeyAtHostAndPort.size() < 2 || typeAndKeyAtHostAndPort.size() > 3)
-                continue;
-
-            type = typeAndKeyAtHostAndPort[0];
-            if (typeAndKeyAtHostAndPort.size() == 3)
-                port = (uint16_t)atoi(typeAndKeyAtHostAndPort[2].c_str());
-
-            vector<string> keyAndHost;
-            boost::split(keyAndHost, typeAndKeyAtHostAndPort[1], boost::is_any_of("@"));
-            if (keyAndHost.size() != 2)
-                continue;
-            pubk = keyAndHost[0];
-            if (pubk.size() != 128)
-                continue;
-            hostIP = keyAndHost[1];
-
-            // todo: use Network::resolveHost()
-            if (hostIP.size() < 4 /* g.it */)
-                continue;
-
-            bool required = type == "required";
-            if (!required && type != "default")
-                continue;
-
-            Public publicKey(fromHex(pubk));
-            try
+            if (regex_match(p, match, rx))
             {
-                preferredNodes[publicKey] = make_pair(NodeIPEndpoint(bi::address::from_string(hostIP), port, port), required);
+                bool required = match.str(1) == "required";
+                NodeSpec ns(match.str(2));
+                if (ns.isValid())
+                    preferredNodes[ns.id()] = make_pair(ns.nodeIPEndpoint(), required);
+                else
+                {
+                    parsingError = true;
+                    break;
+                }
             }
-            catch (...)
+            else
             {
-                cerr << "Unrecognized peerset: " << peerset << "\n";
-                return -1;
+                parsingError = true;
+                break;
             }
         }
-    }
-    if (vm.count("mode"))
-    {
-        string m = vm["mode"].as<string>();
-        if (m == "full")
-            nodeMode = NodeMode::Full;
-        else if (m == "peer")
-            nodeMode = NodeMode::PeerServer;
-        else
+        if (parsingError)
         {
-            cerr << "Unknown mode: " << m << "\n";
-            return -1;
+             cerr << "Unrecognized peerset: " << peersetStr << "\n";
+             return -1;
         }
     }
+
     if (vm.count("import-presale"))
         presaleImports.push_back(vm["import-presale"].as<string>());
     if (vm.count("admin"))
@@ -560,8 +472,8 @@ int main(int argc, char** argv)
     }
     if (vm.count("unsafe-transactions"))
         alwaysConfirm = false;
-    if (vm.count("db-path"))
-        setDataDir(vm["db-path"].as<string>());
+    if (vm.count("data-dir"))
+        setDataDir(vm["data-dir"].as<string>());
     if (vm.count("ipcpath"))
         setIpcPath(vm["ipcpath"].as<string>());
     if (vm.count("config"))
@@ -570,6 +482,12 @@ int main(int argc, char** argv)
         {
             configPath = vm["config"].as<string>();
             configJSON = contentsString(configPath.string());
+
+            if (configJSON.empty())
+            {
+                cerr << "Config file not found or empty (" << configPath.string() << ")\n";
+                return -1;
+            }
         }
         catch (...)
         {
@@ -760,18 +678,16 @@ int main(int argc, char** argv)
     if (vm.count("help"))
     {
         cout << "NAME:\n"
-             << credits() << '\n'
+             << "   aleth " << Version << '\n'
              << "USAGE:\n"
              << "   aleth [options]\n\n"
              << "WALLET USAGE:\n";
         AccountManager::streamAccountHelp(cout);
         AccountManager::streamWalletHelp(cout);
-        cout << clientDefaultMode << clientTransacting << clientMining << clientNetworking;
-        MinerCLI::streamHelp(cout);
-        cout << importExportMode << vmOptions << loggingProgramOptions << generalOptions;
+        cout << clientDefaultMode << clientTransacting << clientNetworking << clientMining << minerOptions;
+        cout << importExportMode << dbOptions << vmOptions << loggingProgramOptions << generalOptions;
         return 0;
     }
-
 
     if (!configJSON.empty())
     {
@@ -802,9 +718,9 @@ int main(int argc, char** argv)
         chainParams = ChainParams(genesisInfo(eth::Network::MainNetwork), genesisStateRoot(eth::Network::MainNetwork));
 
     if (loggingOptions.verbosity > 0)
-        cout << EthGrayBold "cpp-ethereum, a C++ Ethereum client" EthReset << "\n";
+        cout << EthGrayBold "aleth, a C++ Ethereum client" EthReset << "\n";
 
-    m.execute();
+    miner.execute();
 
     fs::path secretsPath;
     if (testingMode)
@@ -849,22 +765,18 @@ int main(int argc, char** argv)
         return getPassword("Enter password for address " + keyManager.accountName(a) + " (" + a.abridged() + "; hint:" + keyManager.passwordHint(a) + "): ");
     };
 
-    auto netPrefs = publicIP.empty() ? NetworkPreferences(listenIP, listenPort, upnp) : NetworkPreferences(publicIP, listenIP ,listenPort, upnp);
+    auto netPrefs = publicIP.empty() ? NetworkConfig(listenIP, listenPort, upnp) : NetworkConfig(publicIP, listenIP ,listenPort, upnp);
     netPrefs.discovery = (privateChain.empty() && !disableDiscovery) || enableDiscovery;
+    netPrefs.allowLocalDiscovery = allowLocalDiscovery;
     netPrefs.pin = vm.count("pin") != 0;
 
     auto nodesState = contents(getDataDir() / fs::path("network.rlp"));
-    auto caps = set<string>{"eth"};
 
     if (testingMode)
-    {
-        chainParams.sealEngineName = "NoProof";
         chainParams.allowFutureBlocks = true;
-    }
 
-    dev::WebThreeDirect web3(WebThreeDirect::composeClientVersion("aleth"), getDataDir(),
-        snapshotPath, chainParams, withExisting, nodeMode == NodeMode::Full ? caps : set<string>(),
-        netPrefs, &nodesState, testingMode);
+    dev::WebThreeDirect web3(WebThreeDirect::composeClientVersion("aleth"), db::databasePath(),
+        snapshotPath, chainParams, withExisting, netPrefs, &nodesState, testingMode);
 
     if (!extraData.empty())
         web3.ethereum()->setExtraData(extraData);
@@ -998,7 +910,7 @@ int main(int argc, char** argv)
         keyManager.import(s, "Imported key (UNSAFE)");
     }
 
-    cout << ethCredits();
+    cout << "aleth " << Version << "\n";
 
     if (mode == OperationMode::ImportSnapshot)
     {
@@ -1024,15 +936,12 @@ int main(int argc, char** argv)
     web3.setPeerStretch(peerStretch);
     std::shared_ptr<eth::TrivialGasPricer> gasPricer =
         make_shared<eth::TrivialGasPricer>(askPrice, bidPrice);
-    eth::Client* c = nodeMode == NodeMode::Full ? web3.ethereum() : nullptr;
-    if (c)
-    {
-        c->setGasPricer(gasPricer);
-        c->setSealer(m.minerType());
-        c->setAuthor(author);
-        if (networkID != NoNetworkID)
-            c->setNetworkId(networkID);
-    }
+    Client& c = *(web3.ethereum());
+    c.setGasPricer(gasPricer);
+    c.setSealer(miner.minerType());
+    c.setAuthor(author);
+    if (networkID != NoNetworkID)
+        c.setNetworkId(networkID);
 
     auto renderFullAddress = [&](Address const& _a) -> std::string
     {
@@ -1050,9 +959,10 @@ int main(int argc, char** argv)
     else
         cout << "Networking disabled. To start, use netstart or pass --bootstrap or a remote host.\n";
 
-    unique_ptr<ModularServer<>> jsonrpcIpcServer;
     unique_ptr<rpc::SessionManager> sessionManager;
     unique_ptr<SimpleAccountHolder> accountHolder;
+    unique_ptr<ModularServer<>> jsonrpcIpcServer;
+
 
     AddressHash allowedDestinations;
 
@@ -1134,18 +1044,12 @@ int main(int argc, char** argv)
     signal(SIGTERM, &ExitHandler::exitHandler);
     signal(SIGINT, &ExitHandler::exitHandler);
 
-    if (c)
-    {
-        unsigned n = c->blockChain().details().number;
-        if (mining)
-            c->startSealing();
+    unsigned n = c.blockChain().details().number;
+    if (mining)
+        c.startSealing();
 
-        while (!exitHandler.shouldExit())
-            stopSealingAfterXBlocks(c, n, mining);
-    }
-    else
-        while (!exitHandler.shouldExit())
-            this_thread::sleep_for(chrono::milliseconds(1000));
+    while (!exitHandler.shouldExit())
+        stopSealingAfterXBlocks(&c, n, mining);
 
     if (jsonrpcIpcServer.get())
         jsonrpcIpcServer->StopListening();

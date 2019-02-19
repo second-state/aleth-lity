@@ -15,6 +15,8 @@
     along with cpp-ethereum.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#pragma once
+
 #include <json_spirit/JsonSpiritHeaders.h>
 #include <string>
 
@@ -57,6 +59,7 @@ extern std::string const c_EIP158ForkBlock;
 extern std::string const c_byzantiumForkBlock;
 extern std::string const c_eWASMForkBlock;
 extern std::string const c_constantinopleForkBlock;
+extern std::string const c_experimentalForkBlock;
 extern std::string const c_accountStartNonce;
 extern std::string const c_maximumExtraDataSize;
 extern std::string const c_tieBreakingGas;

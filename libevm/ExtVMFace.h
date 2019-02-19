@@ -28,6 +28,7 @@
 #include <libdevcore/SHA3.h>
 
 #include <evmc/evmc.h>
+#include <evmc/helpers.h>
 
 #include <boost/optional.hpp>
 #include <functional>
@@ -87,9 +88,9 @@ private:
 
 struct SubState
 {
-    std::set<Address> suicides;    ///< Any accounts that have suicided.
-    LogEntries logs;            ///< Any logs.
-    u256 refunds;                ///< Refund counter of SSTORE nonzero->zero.
+    std::set<Address> suicides;  ///< Any accounts that have suicided.
+    LogEntries logs;             ///< Any logs.
+    int64_t refunds = 0;         ///< Refund counter for storage changes.
 
     SubState& operator+=(SubState const& _s)
     {
@@ -218,6 +219,9 @@ public:
     /// Write a value in storage.
     virtual void setStore(u256, u256) {}
 
+    /// Read original storage value (before modifications in the current transaction).
+    virtual u256 originalStorageValue(u256 const&) { return 0; }
+
     /// Read address's balance.
     virtual u256 balance(Address) { return 0; }
 
@@ -226,6 +230,9 @@ public:
 
     /// @returns the size of the code in bytes at the given address.
     virtual size_t codeSizeAt(Address) { return 0; }
+
+    /// @returns the hash of the code at the given address.
+    virtual h256 codeHashAt(Address) { return h256{}; }
 
     /// Does the account exist?
     virtual bool exists(Address) { return false; }
@@ -264,6 +271,7 @@ public:
     bytesConstRef data;       ///< Current input data.
     bytes code;               ///< Current code that is executing.
     h256 codeHash;            ///< SHA3 hash of the executing code
+    u256 salt;                ///< Values used in new address construction by CREATE2 
     SubState sub;             ///< Sub-band VM state (suicides, refund counter, logs).
     unsigned depth = 0;       ///< Depth of the present call.
     bool isCreate = false;    ///< Is this a CREATE call?

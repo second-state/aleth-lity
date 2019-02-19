@@ -46,7 +46,6 @@ enum IncludeSeal
 enum Strictness
 {
     CheckEverything,
-    JustSeal,
     QuickNonce,
     IgnoreSeal,
     CheckNothingNew
@@ -110,7 +109,7 @@ public:
     static h256 headerHashFromBlock(bytesConstRef _block);
     static RLP extractHeader(bytesConstRef _block);
 
-    explicit operator bool() const { return m_timestamp != Invalid256; }
+    explicit operator bool() const { return m_timestamp >= 0; }
 
     bool operator==(BlockHeader const& _cmp) const
     {
