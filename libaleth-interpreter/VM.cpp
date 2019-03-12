@@ -1588,6 +1588,7 @@ void VM::interpretCases()
         CASE(INVALID)
         DEFAULT
         {
+            cwarn << "Bad Instruction: 0x" << std::hex << (int)m_OP;
             throwBadInstruction();
         }
     }
