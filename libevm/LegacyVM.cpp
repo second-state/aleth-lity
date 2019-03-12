@@ -248,6 +248,8 @@ owning_bytes_ref LegacyVM::exec(u256& _io_gas, ExtVMFace& _ext, OnOpFunc const& 
 //
 void LegacyVM::interpretCases()
 {
+    throw std::runtime_error("LegacyVM is not supported");
+#if 0
     INIT_CASES
     DO_CASES
     {
@@ -1768,4 +1770,5 @@ void LegacyVM::interpretCases()
         }
     }
     WHILE_CASES
+#endif
 }
