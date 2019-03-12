@@ -397,7 +397,7 @@ namespace eth
         &&CALLCODE,                             \
         &&RETURN,                               \
         &&DELEGATECALL,                         \
-        &&CREATE2,                              \
+        &&ENI,                              \
         &&INVALID,                              \
         &&INVALID,                              \
         &&INVALID,                              \

@@ -10,6 +10,13 @@ set(
     VMCalls.cpp
     VMConfig.h
     VMOpt.cpp
+    eni/arg_converter.hpp eni/arg_converter.cpp
+    eni/codes.hpp
+    eni/ENI.cpp
+    eni/ENI.hpp
+    eni/fork_call.h
+    eni/mphelpers.hpp
+    eni/ret_converter.hpp eni/ret_converter.cpp
 )
 add_library(aleth-interpreter STATIC ${sources})
 target_link_libraries(aleth-interpreter PRIVATE devcore aleth-buildinfo evmc::evmc evmc::instructions)

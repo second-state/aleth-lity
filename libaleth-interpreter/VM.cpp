@@ -293,6 +293,7 @@ void VM::interpretCases()
         // Call-related instructions
         //
 
+#if 0
         CASE(CREATE2)
         {
             ON_OP();
@@ -304,6 +305,7 @@ void VM::interpretCases()
             m_bounce = &VM::caseCreate;
         }
         BREAK
+#endif
 
         CASE(CREATE)
         {
