@@ -81,7 +81,7 @@ public:
         for (const auto& path: sharedObjects) {
             void* handler = dlopen(path.c_str(), RTLD_LAZY);
             if (not handler) {
-                throw std::runtime_error(boost::str(boost::format("dlopen failed '%s'") % path));
+                throw std::runtime_error(boost::str(boost::format("dlopen failed: %s") % path));
             }
 
             gasFunc = dlsym(handler, gasSym.c_str());
@@ -91,7 +91,7 @@ public:
 
             runFunc = dlsym(handler, runSym.c_str());
             if (not runFunc) {
-                throw std::runtime_error(boost::str(boost::format("dlsym failed: '%s'") % runSym));
+                throw std::runtime_error(boost::str(boost::format("dlsym failed: %s") % runSym));
             }
 
             opName = eniFunction;
