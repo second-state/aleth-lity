@@ -72,29 +72,29 @@ namespace eth
 #undef ON_OP
 #if EVM_TRACE > 2
 #define ON_OP() \
-    (cerr << "### " << ++m_nSteps << ": " << m_PC << " " << instructionInfo(m_OP).name << endl)
+    (std::cerr << "### " << ++m_nSteps << ": " << m_PC << " " << instructionInfo(m_OP).name << std::endl)
 #else
 #define ON_OP() onOperation()
 #endif
 
 #define TRACE_STR(level, str) \
     if ((level) <= EVM_TRACE) \
-        cerr << "$$$ " << (str) << endl;
+        std::cerr << "$$$ " << (str) << std::endl;
 
 #define TRACE_VAL(level, name, val) \
     if ((level) <= EVM_TRACE)       \
-        cerr << "=== " << (name) << " " << hex << (val) << endl;
+        std::cerr << "=== " << (name) << " " << hex << (val) << std::endl;
 #define TRACE_OP(level, pc, op) \
     if ((level) <= EVM_TRACE)   \
-        cerr << "*** " << (pc) << " " << instructionInfo(op).name << endl;
+        std::cerr << "*** " << (pc) << " " << instructionInfo(op).name << std::endl;
 
 #define TRACE_PRE_OPT(level, pc, op) \
     if ((level) <= EVM_TRACE)        \
-        cerr << "<<< " << (pc) << " " << instructionInfo(op).name << endl;
+        std::cerr << "<<< " << (pc) << " " << instructionInfo(op).name << std::endl;
 
 #define TRACE_POST_OPT(level, pc, op) \
     if ((level) <= EVM_TRACE)         \
-        cerr << ">>> " << (pc) << " " << instructionInfo(op).name << endl;
+        std::cerr << ">>> " << (pc) << " " << instructionInfo(op).name << std::endl;
 #else
 #define TRACE_STR(level, str)
 #define TRACE_VAL(level, name, val)
