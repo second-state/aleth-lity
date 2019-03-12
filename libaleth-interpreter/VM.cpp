@@ -574,7 +574,6 @@ void VM::interpretCases()
         //
 
         CASE(ADD)
-        CASE(UADD)
         {
             ON_OP();
             updateIOGas();
@@ -604,7 +603,6 @@ void VM::interpretCases()
         NEXT
 
         CASE(MUL)
-        CASE(UMUL)
         {
             ON_OP();
             updateIOGas();
@@ -686,7 +684,6 @@ void VM::interpretCases()
         NEXT
 
         CASE(SUB)
-        CASE(USUB)
         {
             ON_OP();
             updateIOGas();

@@ -164,9 +164,9 @@ namespace eth
         &&MULMOD,                               \
         &&EXP,                                  \
         &&SIGNEXTEND,                           \
-        &&INVALID,                              \
-        &&INVALID,                              \
-        &&INVALID,                              \
+        &&SADD,                                 \
+        &&SSUB,                                 \
+        &&SMUL,                                 \
         &&INVALID,                              \
         &&LT, /* 10, */                         \
         &&GT,                                   \
@@ -344,12 +344,12 @@ namespace eth
         &&INVALID,                              \
         &&INVALID,                              \
         &&INVALID,                              \
-        &&SADD, /* C0, */                       \
-        &&UADD,                                 \
-        &&SSUB,                                 \
-        &&USUB,                                 \
-        &&SMUL,                                 \
-        &&UMUL,                                 \
+        &&INVALID,                              \
+        &&INVALID,                              \
+        &&INVALID,                              \
+        &&INVALID,                              \
+        &&INVALID,                              \
+        &&INVALID,                              \
         &&XMOD,                                 \
         &&XSMOD,                                \
         &&INVALID,                              \

@@ -39,6 +39,9 @@ enum class Instruction : uint8_t
     MULMOD,       ///< unsigned modular multiplication
     EXP,          ///< exponential operation
     SIGNEXTEND,   ///< extend length of signed integer
+    SADD = 0xc,   ///< signed addition operation with overflow checking
+    SSUB,         ///< signed multiplication operation with overflow checking
+    SMUL,         ///< signed subtraction operation with overflow checking
 
     LT = 0x10,  ///< less-than comparision
     GT,         ///< greater-than comparision
@@ -189,13 +192,6 @@ enum class Instruction : uint8_t
     RETURNSUB,      ///< return to subroutine jumped from
     PUTLOCAL,       ///< pop top of stack to local variable
     GETLOCAL,       ///< push local variable to top of stack
-
-    SADD = 0xc0,    ///< signed addition operation with overflow checking
-    UADD,           ///< unsigned addition operation with overflow checking
-    SSUB,           ///< signed multiplication operation with overflow checking
-    USUB,           ///< unsigned multiplication operation with overflow checking
-    SMUL,           ///< signed subtraction operation with overflow checking
-    UMUL,           ///< unsigned subtraction operation with overflow checking
 
     XADD = 0xc1,    ///< addition operation
     XMUL,           ///< mulitplication operation
