@@ -81,7 +81,7 @@ public:
         for (const auto& path: sharedObjects) {
             void* handler = dlopen(path.c_str(), RTLD_LAZY);
             if (not handler) {
-                throw std::runtime_error(boost::str(boost::format("dlopen failed: %s") % path));
+                throw std::runtime_error(boost::str(boost::format("dlopen failed: %s\nError: %s") % path % dlerror()));
             }
 
             gasFunc = dlsym(handler, gasSym.c_str());
@@ -91,20 +91,21 @@ public:
 
             runFunc = dlsym(handler, runSym.c_str());
             if (not runFunc) {
-                throw std::runtime_error(boost::str(boost::format("dlsym failed: %s") % runSym));
+                throw std::runtime_error(boost::str(boost::format("dlsym failed: %s\nError: %s") % runSym % dlerror()));
             }
 
             opName = eniFunction;
             this->argsText = argsText;
             return;
         }
-        throw std::runtime_error(boost::str(boost::format("symbol not found: '%s'") % gasFunc));
+        throw std::runtime_error(boost::str(boost::format("symbol not found: '%s'") % gasSym));
     }
 
     uint64_t Gas()
     {
         int status = 87;
-        uint64_t gas = fork_gas(gasFunc, argsText.c_str(), &status);
+        char* argsTextCopy = strdup(argsText.c_str());
+        uint64_t gas = fork_gas(gasFunc, argsTextCopy, &status);
         if (status != 0)
         {
             throw "ENI gas error status";
@@ -115,7 +116,8 @@ public:
     std::string ExecuteENI()
     {
         int status = 87;
-        char* retCStr = fork_run(runFunc, argsText.c_str(), &status);
+        char* argsTextCopy = strdup(argsText.c_str());
+        char* retCStr = fork_run(runFunc, argsTextCopy, &status);
         std::string ret = retCStr;
         free(retCStr);
         if (status != 0) {
