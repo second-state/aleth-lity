@@ -176,8 +176,8 @@ void VM::caseENI()
 {
     m_bounce = &VM::interpretCases;
     ENI eni;
+    std::string funcName = std::string(toBigEndianString(m_SP[0]).c_str());
 
-    std::string funcName = toString(m_SP[0]);
     u256 typeOffset = m_SP[1];
     u256 dataOffset = m_SP[2];
     int64_t argsTypeLength = (int64_t)s256FromBigEndian(m_mem.data() + (unsigned)typeOffset);
