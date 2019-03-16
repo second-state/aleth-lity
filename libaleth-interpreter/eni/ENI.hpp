@@ -103,26 +103,31 @@ public:
 
     uint64_t Gas()
     {
-        int status = 87;
+        int status = ENI_FAILURE;
         char* argsTextCopy = strdup(argsText.c_str());
         uint64_t gas = fork_gas(gasFunc, argsTextCopy, &status);
         if (status != 0)
         {
-            throw "ENI gas error status";
+            std::runtime_error(boost::str(boost::format("ENI %s gas error, status=%d") % opName % status));
         }
         return gas;
     }
 
     std::string ExecuteENI()
     {
-        int status = 87;
+        int status = ENI_FAILURE;
         char* argsTextCopy = strdup(argsText.c_str());
         char* retCStr = fork_run(runFunc, argsTextCopy, &status);
-        std::string ret = retCStr;
-        free(retCStr);
+
         if (status != 0) {
+            free(argsTextCopy);
+            free(retCStr);
             throw std::runtime_error(boost::str(boost::format("ENI %s run error, status=%d") % opName % status));
         }
+
+        std::string ret = retCStr;
+        free(argsTextCopy);
+        free(retCStr);
         return ret;
     }
 
