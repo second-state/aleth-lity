@@ -175,25 +175,32 @@ void VM::caseCreate()
 void VM::caseENI()
 {
     m_bounce = &VM::interpretCases;
+
     ENI eni;
     std::string funcName = std::string(toBigEndianString(m_SP[0]).c_str());
 
     u256 typeOffset = m_SP[1];
     u256 dataOffset = m_SP[2];
-    int64_t argsTypeLength = (int64_t)s256FromBigEndian(m_mem.data() + (unsigned)typeOffset);
-    int64_t argsDataLength = (int64_t)s256FromBigEndian(m_mem.data() + (unsigned)dataOffset);
+    int64_t argsTypeLength = (int64_t)s256FromBigEndian(m_mem.data() + (size_t)typeOffset);
+    int64_t argsDataLength = (int64_t)s256FromBigEndian(m_mem.data() + (size_t)dataOffset);
 
     if (argsDataLength % 32)
     {
         argsDataLength += 32 - argsDataLength % 32;
     }
-    auto argsType = std::vector<Code>(
-        (Code*)m_mem.data() + 32 + (unsigned)typeOffset, (Code*)m_mem.data() + 32 + (unsigned)typeOffset + argsTypeLength);
-    auto argsData = std::string(
-        m_mem.data() + 32 + (unsigned)dataOffset, m_mem.data() + 32 + (unsigned)dataOffset + argsDataLength);
-    auto argsText = ConvertArguments(argsType, argsData);
 
+    std::vector<Code> argsType((argsTypeLength));
+    memcpy(argsType.data(), &m_mem[32 + (size_t)typeOffset], (size_t)argsTypeLength);
+    std::string argsData(
+        &m_mem[32 + (size_t)dataOffset],
+        &m_mem[32 + (size_t)dataOffset + argsDataLength]
+    );
+
+    auto argsText = ConvertArguments(argsType, argsData);
     eni.InitENI(funcName, argsText);
+
+    m_runGas += 400 + eni.Gas();
+    updateIOGas();
 
     auto retText = eni.ExecuteENI();
 
@@ -204,8 +211,9 @@ void VM::caseENI()
     }
     int64_t retTypeLength =
         (int64_t)s256FromBigEndian(m_mem.data() + (unsigned)retTypeOffset);
-    auto retType = std::vector<Code>(
-        (Code*)m_mem.data() + 32 + (unsigned)retTypeOffset, (Code*)m_mem.data() + 32 + (unsigned)retTypeOffset + retTypeLength);
+    std::vector<Code>retType((unsigned)retTypeLength);
+    memcpy(retType.data(), &m_mem[32 + (unsigned)retTypeOffset], (unsigned)retTypeLength);
+
     auto retData = ConvertReturnValue(retType, retText);
     auto retDataOffset = dataOffset + 32 + argsDataLength;
     auto retDataLengthBytes = toBigEndian(u256(retData.size()));
@@ -214,12 +222,15 @@ void VM::caseENI()
     std::memcpy(m_mem.data() + (uint64_t)retDataOffset, retDataLengthBytes.data(), 32);
     std::memcpy(m_mem.data() + (uint64_t)retDataOffset + 32, retData.data(), retData.size());
     auto nextFreeMemoryOffset = retDataOffset + 32 + retData.size();
+
     if (nextFreeMemoryOffset % 32 > 0) {
         nextFreeMemoryOffset += 32 - nextFreeMemoryOffset % 32;
     }
     auto nextFreeMemoryOffsetBytes = toBigEndian(nextFreeMemoryOffset);
     std::memcpy(m_mem.data() + 0x40, nextFreeMemoryOffsetBytes.data(), 32);
+
     m_SPP[0] = retDataOffset + 32;
+    ++m_PC;
 }
 
 void VM::caseCall()
