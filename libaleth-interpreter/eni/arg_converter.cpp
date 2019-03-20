@@ -85,7 +85,6 @@ private:
     {
         ti++;
         out << "[";
-        boost::multiprecision::int256_t leng256;
         if (ti + 32 > typeInfo.end()) {
             throw ArgumentParserError("typeInfo index out of range");
         }
