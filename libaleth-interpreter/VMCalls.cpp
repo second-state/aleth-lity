@@ -199,8 +199,8 @@ void VM::caseENI()
     auto argsText = ConvertArguments(argsType, argsData);
     eni.InitENI(funcName, argsText);
 
-    m_runGas += 400 + eni.Gas();
-    updateIOGas();
+    // the constant part of the gas cost is set by VM::fetchInstruction()
+    m_runGas += eni.Gas();
 
     auto retText = eni.ExecuteENI();
 
@@ -218,7 +218,8 @@ void VM::caseENI()
     auto retDataOffset = dataOffset + 32 + argsDataLength;
     auto retDataLengthBytes = toBigEndian(u256(retData.size()));
 
-    m_mem.resize((uint64_t)(retDataOffset + 32 + retData.size()));
+    updateMem((uint64_t)(retDataOffset + 32 + retData.size()));
+    updateIOGas();
     std::memcpy(m_mem.data() + (uint64_t)retDataOffset, retDataLengthBytes.data(), 32);
     std::memcpy(m_mem.data() + (uint64_t)retDataOffset + 32, retData.data(), retData.size());
     auto nextFreeMemoryOffset = retDataOffset + 32 + retData.size();
